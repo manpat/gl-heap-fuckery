@@ -449,6 +449,7 @@ name = "gl-fuckery"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bumpalo",
  "common",
  "gl",
  "glam",

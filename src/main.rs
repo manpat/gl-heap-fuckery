@@ -17,6 +17,10 @@ struct Game {
 	pipeline: PipelineHandle,
 	indexed_pipeline: PipelineHandle,
 
+	vert_shader: ShaderHandle,
+	vert_indexed_shader: ShaderHandle,
+	frag_shader: ShaderHandle,
+
 	time: f32,
 }
 
@@ -64,14 +68,25 @@ impl Game {
 
 		dbg!(&context);
 
-		Ok(Game { context, pipeline, indexed_pipeline, time: 0.0 })
+		Ok(Game {
+			context,
+			pipeline,
+			indexed_pipeline,
+
+			vert_shader,
+			vert_indexed_shader,
+			frag_shader,
+
+			time: 0.0
+		})
 	}
 }
 
 impl main_loop::MainLoop for Game {
 	fn present(&mut self) {
 		self.time += 1.0/60.0;
-		self.context.data_pushed_counter = 0;
+
+		self.context.start_frame();
 
 		unsafe {
 			gl::ClearColor(1.0, 0.5, 1.0, 1.0);
@@ -84,20 +99,43 @@ impl main_loop::MainLoop for Game {
 			* Mat4::rotate_y(self.time);
 
 		self.context.bind_pipeline(self.pipeline);
-		self.context.push_ubo(0, &[projection_view]);
+
+		let proj_view_buffer = self.context.stream_buffer(&[projection_view]);
 
 
-		self.context.push_ssbo(0, &[
-			[-0.5, -0.5, 0.0, 1.0f32],
-			[-0.5,  0.5, 0.0, 1.0],
-			[ 0.5,  0.5, 0.0, 1.0],
-			[ 0.5, -0.5, 0.0, 1.0],
-		]);
+		{
+			let vertex_buffer = self.context.stream_buffer(&[
+				[-0.5, -0.5, 0.0, 1.0f32],
+				[-0.5,  0.5, 0.0, 1.0],
+				[ 0.5,  0.5, 0.0, 1.0],
+				[ 0.5, -0.5, 0.0, 1.0],
+			]);
 
-		self.context.push_ssbo(1, &[0u32, 1, 2, 0, 2, 3]);
-		self.context.push_ubo(1, &[0.5f32, 0.5, 1.0, 1.0]);
+			let index_buffer = self.context.stream_buffer(&[0u32, 1, 2, 0, 2, 3]);
+			let colour_buffer = self.context.stream_buffer(&[0.5f32, 0.5, 1.0, 1.0]);
 
-		self.context.draw(6, 1);
+			// self.context.draw(6, 1);
+
+			self.context.commands.push(Command::Draw(DrawCmd {
+				vertex_shader: self.vert_shader,
+				fragment_shader: Some(self.frag_shader),
+
+				num_elements: 6,
+				num_instances: 1,
+
+				index_buffer: std::ptr::null_mut(),
+
+				ubo_bindings: vec![
+					(0, proj_view_buffer),
+					(1, colour_buffer)
+				],
+
+				ssbo_bindings: vec![
+					(0, vertex_buffer),
+					(1, index_buffer)
+				],
+			}));
+		}
 
 
 
@@ -131,7 +169,7 @@ impl main_loop::MainLoop for Game {
 		]);
 		self.context.draw_indexed(&[0, 2, 3], 3);
 
-		dbg!(self.context.data_pushed_counter);
+		self.context.end_frame();
 	}
 }
 
@@ -176,8 +214,44 @@ use std::collections::HashMap;
 
 
 #[derive(Debug)]
+enum StreamedBuffer {
+	Pending {
+		data: *const u8,
+		size: usize,
+	},
+
+	Uploaded {
+		offset: isize,
+		size: usize,
+		is_ubo: bool,
+	}
+}
+
+#[derive(Debug)]
+struct DrawCmd {
+	vertex_shader: ShaderHandle,
+	fragment_shader: Option<ShaderHandle>,
+
+	num_elements: u32,
+	num_instances: u32,
+
+	// If set, use indexed rendering
+	index_buffer: *mut StreamedBuffer,
+
+	ssbo_bindings: Vec<(u32, *mut StreamedBuffer)>,
+	ubo_bindings: Vec<(u32, *mut StreamedBuffer)>,
+}
+
+#[derive(Debug)]
+enum Command {
+	Draw(DrawCmd),
+}
+
+
+
+#[derive(Debug)]
 struct Context {
-	resource_root: ResourcePath,
+	resource_root_path: ResourcePath,
 
 	shader_defs: HashMap<ShaderDef, ShaderHandle>,
 	shader_names: HashMap<ShaderHandle, u32>,
@@ -186,6 +260,9 @@ struct Context {
 	pipeline_defs: HashMap<PipelineDef, PipelineHandle>,
 	pipeline_names: HashMap<PipelineHandle, u32>,
 	pipeline_counter: u32,
+
+	frame_data: bumpalo::Bump,
+	commands: Vec<Command>,
 
 	upload_buffer_name: u32,
 	upload_buffer_cursor: isize,
@@ -200,9 +277,9 @@ const UPLOAD_BUFFER_SIZE: isize = 1<<15;
 
 impl Context {
 	pub fn new() -> anyhow::Result<Self> {
-		let resource_root = ResourcePath::from("resource");
+		let resource_root_path = ResourcePath::from("resource");
 
-		anyhow::ensure!(resource_root.exists(), "Couldn't find resource path");
+		anyhow::ensure!(resource_root_path.exists(), "Couldn't find resource path");
 
 		let mut upload_buffer_name = 0;
 		unsafe {
@@ -226,7 +303,7 @@ impl Context {
 		}
 
 		Ok(Self{
-			resource_root,
+			resource_root_path,
 
 			shader_defs: HashMap::default(),
 			shader_names: HashMap::default(),
@@ -235,6 +312,9 @@ impl Context {
 			pipeline_defs: HashMap::default(),
 			pipeline_names: HashMap::default(),
 			pipeline_counter: 0,
+
+			frame_data: bumpalo::Bump::with_capacity(UPLOAD_BUFFER_SIZE as usize),
+			commands: Vec::new(),
 
 			upload_buffer_name,
 			upload_buffer_cursor: 0,
@@ -246,8 +326,157 @@ impl Context {
 		})
 	}
 
+	pub fn start_frame(&mut self) {
+		self.data_pushed_counter = 0;
+
+		self.commands.clear();
+		self.frame_data.reset();
+	}
+
+	pub fn end_frame(&mut self) {
+		// TODO(pat.m): non-ubo data could be interleaved with ubo data to save space
+
+		// Upload UBOs first since they have the greatest alignment requirements
+		self.upload_ubo_data();
+		self.upload_non_ubo_data();
+
+		let commands = std::mem::replace(&mut self.commands, Vec::new());
+
+		for cmd in commands {
+			match cmd {
+				Command::Draw(cmd) => {
+					let pipeline_def = PipelineDef {
+						vertex: Some(cmd.vertex_shader),
+						fragment: cmd.fragment_shader,
+						compute: None,
+					};
+
+					let pipeline_handle = self.create_pipeline(&pipeline_def)
+						.unwrap();
+
+					self.bind_pipeline(pipeline_handle);
+
+
+					for &(index, buffer) in cmd.ubo_bindings.iter() {
+						let &StreamedBuffer::Uploaded{offset, size, ..} = (unsafe {&*buffer}) else {
+							panic!()
+						};
+
+
+						unsafe {
+							gl::BindBufferRange(gl::UNIFORM_BUFFER, index, self.upload_buffer_name, offset, size as isize);
+						}
+					}
+
+					for &(index, buffer) in cmd.ssbo_bindings.iter() {
+						let &StreamedBuffer::Uploaded{offset, size, ..} = (unsafe {&*buffer}) else {
+							panic!()
+						};
+
+						unsafe {
+							gl::BindBufferRange(gl::SHADER_STORAGE_BUFFER, index, self.upload_buffer_name, offset, size as isize);
+						}
+					}
+
+					if let Some(&StreamedBuffer::Uploaded{offset, ..}) = unsafe { cmd.index_buffer.as_ref() } {
+						let offset_ptr = offset as usize as *const _;
+
+						unsafe {
+							gl::VertexArrayElementBuffer(self.vao_name, self.upload_buffer_name);
+							gl::DrawElementsInstanced(gl::TRIANGLES, cmd.num_elements as i32, gl::UNSIGNED_SHORT,
+								offset_ptr, cmd.num_instances as i32);
+						}
+					} else {
+						unsafe {
+							gl::DrawArraysInstanced(gl::TRIANGLES, 0, cmd.num_elements as i32, cmd.num_instances as i32);
+						}
+					}
+				}
+			}
+		}
+
+		// dbg!(self.data_pushed_counter);
+		if self.data_pushed_counter >= UPLOAD_BUFFER_SIZE as usize {
+			panic!("upload buffer overrun");
+		}
+	}
+
+	pub fn stream_buffer<T>(&mut self, data: &[T]) -> *mut StreamedBuffer
+		where T: Copy
+	{
+		let data_copy = self.frame_data.alloc_slice_copy(data);
+		self.frame_data.alloc(StreamedBuffer::Pending {
+			data: data_copy.as_ptr().cast(),
+			size: data_copy.len() * std::mem::size_of::<T>(),
+		})
+	}
+
+	fn upload_ubo_data(&mut self) {
+		for cmd in self.commands.iter_mut() {
+			match cmd {
+				Command::Draw(cmd) => {
+					for (_, buffer) in cmd.ubo_bindings.iter_mut() {
+						if let &StreamedBuffer::Pending{data, size} = unsafe {&**buffer} {
+							let slice = unsafe{std::slice::from_raw_parts(data, size)};
+
+							let offset = Self::push_data_inner(slice, self.uniform_buffer_offset_alignment,
+								self.upload_buffer_name, &mut self.upload_buffer_cursor,
+								&mut self.data_pushed_counter);
+
+							unsafe {
+								**buffer = StreamedBuffer::Uploaded {offset, size, is_ubo: true}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	fn upload_non_ubo_data(&mut self) {
+		// SSBOs first
+		for cmd in self.commands.iter_mut() {
+			match cmd {
+				Command::Draw(cmd) => {
+					for (_, buffer) in cmd.ssbo_bindings.iter_mut() {
+						if let &StreamedBuffer::Pending{data, size} = unsafe {&**buffer} {
+							let slice = unsafe{std::slice::from_raw_parts(data, size)};
+
+							let offset = Self::push_data_inner(slice, 32,
+								self.upload_buffer_name, &mut self.upload_buffer_cursor,
+								&mut self.data_pushed_counter);
+
+							unsafe {
+								**buffer = StreamedBuffer::Uploaded {offset, size, is_ubo: false}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Then index buffers
+		for cmd in self.commands.iter_mut() {
+			match cmd {
+				Command::Draw(cmd) => {
+					if let Some(buffer) = unsafe { cmd.index_buffer.as_mut() } {
+						if let &mut StreamedBuffer::Pending{data, size} = buffer {
+							let slice = unsafe{std::slice::from_raw_parts(data, size)};
+
+							let offset = Self::push_data_inner(slice, 2,
+								self.upload_buffer_name, &mut self.upload_buffer_cursor,
+								&mut self.data_pushed_counter);
+
+							*buffer = StreamedBuffer::Uploaded {offset, size, is_ubo: false}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	pub fn load_text(&mut self, def: &ResourcePathRef) -> anyhow::Result<String> {
-		let string = std::fs::read_to_string(&self.resource_root.join(def))?;
+		let string = std::fs::read_to_string(&self.resource_root_path.join(def))?;
 		Ok(string)
 	}
 
@@ -346,37 +575,47 @@ impl Context {
 		}
 	}
 
-	fn push_data<T>(&mut self, data: &[T], alignment: isize) -> isize
+
+	fn push_data_inner<T>(data: &[T], alignment: isize, upload_buffer_name: u32,
+		upload_buffer_cursor: &mut isize, data_pushed_counter: &mut usize) -> isize
 		where T: Copy
 	{
 		let byte_size = (data.len() * std::mem::size_of::<T>()) as isize;
 
 		// Move to next alignment boundary
-		let pre_alignment_cursor = self.upload_buffer_cursor;
-		self.upload_buffer_cursor = (self.upload_buffer_cursor + alignment - 1) & -alignment;
+		let pre_alignment_cursor = *upload_buffer_cursor;
+		*upload_buffer_cursor = (*upload_buffer_cursor + alignment - 1) & -alignment;
 
-		let should_invalidate = self.upload_buffer_cursor + byte_size > UPLOAD_BUFFER_SIZE;
+		let should_invalidate = *upload_buffer_cursor + byte_size > UPLOAD_BUFFER_SIZE;
 		if should_invalidate {
-			self.upload_buffer_cursor = 0;
+			*upload_buffer_cursor = 0;
 		}
 
 		unsafe {
 			let access = gl::MAP_WRITE_BIT
 				| gl::MAP_UNSYNCHRONIZED_BIT
-				| gl::MAP_INVALIDATE_RANGE_BIT; // if should_invalidate { gl::MAP_INVALIDATE_RANGE_BIT } else { 0 };
+				| gl::MAP_INVALIDATE_RANGE_BIT;
 
-			let ptr = gl::MapNamedBufferRange(self.upload_buffer_name, self.upload_buffer_cursor, byte_size as isize, access);
+			let ptr = gl::MapNamedBufferRange(upload_buffer_name, *upload_buffer_cursor, byte_size as isize, access);
 
 			std::ptr::copy(data.as_ptr(), ptr as *mut T, data.len());
 
-			gl::UnmapNamedBuffer(self.upload_buffer_name);
+			gl::UnmapNamedBuffer(upload_buffer_name);
 		}
 
-		let offset = self.upload_buffer_cursor;
-		self.upload_buffer_cursor += byte_size;
-		self.data_pushed_counter += (self.upload_buffer_cursor as usize).checked_sub(pre_alignment_cursor as usize)
+		let offset = *upload_buffer_cursor;
+		*upload_buffer_cursor += byte_size;
+		*data_pushed_counter += (*upload_buffer_cursor as usize).checked_sub(pre_alignment_cursor as usize)
 			.unwrap_or((byte_size + UPLOAD_BUFFER_SIZE - pre_alignment_cursor) as usize);
+
 		offset
+	}
+
+	fn push_data<T>(&mut self, data: &[T], alignment: isize) -> isize
+		where T: Copy
+	{
+		Self::push_data_inner(data, alignment, self.upload_buffer_name, &mut self.upload_buffer_cursor,
+			&mut self.data_pushed_counter)
 	}
 
 	pub fn push_ssbo<T>(&mut self, index: u32, data: &[T])
