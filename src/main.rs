@@ -139,35 +139,69 @@ impl main_loop::MainLoop for Game {
 
 
 
-		self.context.push_ssbo(0, &[
-			[-0.2, -0.2, 0.5, 1.0f32],
-			[ 0.0,  0.2, 0.5, 1.0],
-			[ 0.2, -0.2, 0.5, 1.0],
-		]);
+		// self.context.push_ssbo(0, &[
+		// 	[-0.2, -0.2, 0.5, 1.0f32],
+		// 	[ 0.0,  0.2, 0.5, 1.0],
+		// 	[ 0.2, -0.2, 0.5, 1.0],
+		// ]);
 
-		self.context.push_ssbo(1, &[0u32, 1, 2]);
-		self.context.push_ubo(1, &[0.5f32, 1.0, 0.5, 1.0]);
+		// self.context.push_ssbo(1, &[0u32, 1, 2]);
+		// self.context.push_ubo(1, &[0.5f32, 1.0, 0.5, 1.0]);
 
-		self.context.draw(3, 1);
+		// self.context.draw(3, 1);
 
 
-		self.context.bind_pipeline(self.indexed_pipeline);
-		self.context.push_ssbo(0, &[
-			[-0.2, -0.2, -0.4, 1.0f32],
-			[-0.2,  0.2, -0.4, 1.0],
-			[ 0.2,  0.2, -0.4, 1.0],
-			[ 0.2, -0.2, -0.4, 1.0],
-		]);
+		// self.context.bind_pipeline(self.indexed_pipeline);
+		// self.context.push_ssbo(0, &[
+		// 	[-0.2, -0.2, -0.4, 1.0f32],
+		// 	[-0.2,  0.2, -0.4, 1.0],
+		// 	[ 0.2,  0.2, -0.4, 1.0],
+		// 	[ 0.2, -0.2, -0.4, 1.0],
+		// ]);
 
-		self.context.push_ssbo(1, &[1.0, 1.0, 0.5, 1.0f32]);
-		self.context.draw_indexed(&[0, 1, 2], 1);
+		// self.context.push_ssbo(1, &[1.0, 1.0, 0.5, 1.0f32]);
+		// self.context.draw_indexed(&[0, 1, 2], 1);
 
-		self.context.push_ssbo(1, &[
-			[0.5, 0.2, 0.5, 1.0f32],
-			[0.5, 0.4, 0.2, 1.0f32],
-			[0.2, 0.5, 0.5, 1.0f32],
-		]);
-		self.context.draw_indexed(&[0, 2, 3], 3);
+		{
+			let vertex_buffer = self.context.stream_buffer(&[
+				[-0.2, -0.2, -0.4, 1.0f32],
+				[-0.2,  0.2, -0.4, 1.0],
+				[ 0.2,  0.2, -0.4, 1.0],
+				[ 0.2, -0.2, -0.4, 1.0],
+			]);
+
+			let index_buffer = self.context.stream_buffer(&[0u16, 1, 2]);
+			let colour_buffer = self.context.stream_buffer(&[1.0, 1.0, 0.5, 1.0f32]);
+
+			// self.context.draw(6, 1);
+
+			self.context.commands.push(Command::Draw(DrawCmd {
+				vertex_shader: self.vert_indexed_shader,
+				fragment_shader: Some(self.frag_shader),
+
+				num_elements: 3,
+				num_instances: 1,
+
+				index_buffer,
+
+				ubo_bindings: vec![
+					(0, proj_view_buffer),
+				],
+
+				ssbo_bindings: vec![
+					(0, vertex_buffer),
+					(1, colour_buffer)
+				],
+			}));
+		}
+
+		// self.context.bind_pipeline(self.indexed_pipeline);
+		// self.context.push_ssbo(1, &[
+		// 	[0.5, 0.2, 0.5, 1.0f32],
+		// 	[0.5, 0.4, 0.2, 1.0f32],
+		// 	[0.2, 0.5, 0.5, 1.0f32],
+		// ]);
+		// self.context.draw_indexed(&[0, 2, 3], 3);
 
 		self.context.end_frame();
 	}
