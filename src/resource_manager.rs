@@ -108,6 +108,10 @@ impl ResourceManager {
 				let error = std::str::from_utf8(&buf[..len as usize])?;
 				anyhow::bail!("Failed to create shader '{}':\n{}", def.path.display(), error);
 			}
+
+			if let Some(path_str) = def.path.to_str() {
+				gl::ObjectLabel(gl::PROGRAM, raw_handle, path_str.len() as i32, path_str.as_ptr() as *const _);
+			}
 		}
 
 		let handle = ShaderHandle(self.shader_counter);
