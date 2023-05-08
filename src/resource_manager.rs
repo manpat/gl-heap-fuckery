@@ -1,15 +1,18 @@
 pub mod shader;
 pub mod pipeline;
+pub mod sampler;
+pub mod image;
 
 use std::collections::HashMap;
 
 pub type ResourcePath = std::path::PathBuf;
 pub type ResourcePathRef = std::path::Path;
 
-pub use self::shader::{ShaderType, ShaderDef, BindingLocation};
-pub use self::pipeline::{PipelineDef, PipelineObject};
+pub use shader::{ShaderType, ShaderDef, BindingLocation};
+pub use pipeline::{PipelineDef, PipelineObject};
+pub use sampler::{SamplerDef, AddressingMode, FilterMode, SamplerObject};
 
-use self::shader::ShaderObject;
+use shader::ShaderObject;
 
 
 
@@ -31,6 +34,8 @@ pub struct ResourceManager {
 	shader_counter: u32,
 
 	pipeline_objects: HashMap<PipelineDef, PipelineObject>,
+
+	sampler_objects: HashMap<SamplerDef, SamplerObject>,
 }
 
 impl ResourceManager {
@@ -47,6 +52,7 @@ impl ResourceManager {
 			shader_counter: 0,
 
 			pipeline_objects: HashMap::default(),
+			sampler_objects: HashMap::default(),
 		})
 	}
 
@@ -61,8 +67,6 @@ impl ResourceManager {
 		}
 
 		let object = self::shader::compile_shader(self, def)?;
-
-		dbg!(&object);
 
 		let handle = ShaderHandle(self.shader_counter);
 		self.shader_counter += 1;
@@ -84,6 +88,11 @@ impl ResourceManager {
 		let object = self::pipeline::create_pipeline(self, def)?;
 		let object = self.pipeline_objects.entry(def.clone()).or_insert(object);
 		Ok(object)
+	}
+
+	pub fn get_sampler<'s>(&'s mut self, def: &'_ SamplerDef) -> &'s SamplerObject {
+		self.sampler_objects.entry(def.clone())
+			.or_insert_with(|| self::sampler::create_sampler(def))
 	}
 
 	pub fn resolve_shader(&self, handle: ShaderHandle) -> Option<&ShaderObject> {

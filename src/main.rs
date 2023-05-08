@@ -29,6 +29,9 @@ struct Game {
 	vert_indexed_shader: ShaderHandle,
 	frag_shader: ShaderHandle,
 
+	gen_args_compute_shader: ShaderHandle,
+	gen_color_compute_shader: ShaderHandle,
+
 	time: f32,
 }
 
@@ -52,9 +55,22 @@ impl Game {
 			shader_type: ShaderType::Fragment,
 		};
 
+		let gen_args_compute_shader_def = ShaderDef {
+			path: ResourcePath::from("shaders/gen_args.cs.glsl"),
+			shader_type: ShaderType::Compute,
+		};
+
+		let gen_color_compute_shader_def = ShaderDef {
+			path: ResourcePath::from("shaders/gen_color.cs.glsl"),
+			shader_type: ShaderType::Compute,
+		};
+
 		let vert_shader = context.resource_manager.load_shader(&vert_shader_def)?;
 		let vert_indexed_shader = context.resource_manager.load_shader(&vert_indexed_shader_def)?;
 		let frag_shader = context.resource_manager.load_shader(&frag_shader_def)?;
+
+		let gen_args_compute_shader = context.resource_manager.load_shader(&gen_args_compute_shader_def)?;
+		let gen_color_compute_shader = context.resource_manager.load_shader(&gen_color_compute_shader_def)?;
 
 		unsafe {
 			gl::Enable(gl::DEPTH_TEST);
@@ -68,6 +84,9 @@ impl Game {
 			vert_indexed_shader,
 			frag_shader,
 
+			gen_args_compute_shader,
+			gen_color_compute_shader,
+
 			time: 0.0
 		})
 	}
@@ -77,7 +96,6 @@ impl main_loop::MainLoop for Game {
 	fn present(&mut self) {
 		self.time += 1.0/60.0;
 
-		self.frame_state.reset();
 		self.context.start_frame();
 
 		unsafe {
@@ -92,6 +110,21 @@ impl main_loop::MainLoop for Game {
 		let proj_view_buffer = self.frame_state.stream_buffer(&[projection_view]);
 		let quad_index_buffer = self.frame_state.stream_buffer(&[0u32, 1, 2, 0, 2, 3]);
 
+		let args_buffer = self.frame_state.reserve_buffer(std::mem::size_of::<[u32; 3]>());
+		let colour_buffer = self.frame_state.reserve_buffer(std::mem::size_of::<[f32; 4]>());
+
+		self.frame_state.dispatch(self.gen_args_compute_shader)
+			.groups(1, 1, 1)
+			.buffer("ArgsBuffer", args_buffer);
+
+		self.frame_state.memory_barrier();
+
+		self.frame_state.dispatch(self.gen_color_compute_shader)
+			.indirect(args_buffer)
+			.buffer("ColorBuffer", colour_buffer);
+
+		self.frame_state.memory_barrier();
+
 		{
 			let vertex_buffer = [
 				[-0.5, -0.5, 0.0, 1.0f32],
@@ -100,13 +133,12 @@ impl main_loop::MainLoop for Game {
 				[ 0.0, -0.5, 0.0, 1.0],
 			];
 
-			let colour_buffer = [0.5f32, 0.5, 1.0, 1.0];
 
 			self.frame_state.draw(self.vert_shader, self.frag_shader)
 				.elements(6)
 				.instances(1)
 				.ubo(0, proj_view_buffer)
-				.buffer("PerDrawUniforms", &colour_buffer)
+				.buffer("PerDrawUniforms", colour_buffer) 
 				.buffer("Positions", &vertex_buffer)
 				.buffer(BindingLocation::Ssbo(1), quad_index_buffer);
 		}
@@ -133,16 +165,7 @@ impl main_loop::MainLoop for Game {
 				.ssbo(1, &colour_data);
 		}
 
-		unsafe {
-			let msg = "Frame Evaluate";
-			gl::PushDebugGroup(gl::DEBUG_SOURCE_APPLICATION, 0, msg.len() as i32, msg.as_ptr() as *const _);
-		}
-
 		self.context.end_frame(&mut self.frame_state);
-
-		unsafe {
-			gl::PopDebugGroup();
-		}
 	}
 }
 

@@ -36,7 +36,7 @@ impl Context {
 	}
 
 	pub fn end_frame(&mut self, frame_state: &mut FrameState) {
-		use crate::commands::BlockBinding;
+		use crate::commands::{BlockBinding, DispatchSizeSource};
 
 		// TODO(pat.m): non-ubo data could be interleaved with ubo data to save space
 
@@ -61,6 +61,25 @@ impl Context {
 						}
 					}
 				}
+
+				Command::Dispatch(cmd) => {
+					for (binding, _) in cmd.block_bindings.iter_mut() {
+						if let BlockBinding::Named(name) = binding {
+							let pipeline_def = PipelineDef {
+								vertex: None,
+								fragment: None,
+								compute: Some(cmd.compute_shader),
+							};
+
+							let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
+							let block = pipeline.composite_blocks.get(*name).unwrap();
+
+							*binding = BlockBinding::Explicit(block.binding_location);
+						}
+					}
+				}
+
+				_ => {}
 			}
 		}
 
@@ -74,6 +93,16 @@ impl Context {
 						}
 					}
 				}
+
+				Command::Dispatch(cmd) => {
+					for (binding, buffer) in cmd.block_bindings.iter() {
+						if let BlockBinding::Explicit(BindingLocation::Ubo(_)) = binding {
+							frame_state.mark_ubo(*buffer);
+						}
+					}
+				}
+
+				_ => {}
 			}
 		}
 
@@ -86,6 +115,16 @@ impl Context {
 						}
 					}
 				}
+
+				Command::Dispatch(cmd) => {
+					for (binding, buffer) in cmd.block_bindings.iter() {
+						if let BlockBinding::Explicit(BindingLocation::Ssbo(_)) = binding {
+							frame_state.mark_ssbo(*buffer);
+						}
+					}
+				}
+
+				_ => {}
 			}
 		}
 
@@ -96,7 +135,20 @@ impl Context {
 						frame_state.mark_index_buffer(buffer);
 					}
 				}
+
+				Command::Dispatch(cmd) => {
+					if let DispatchSizeSource::Indirect(buffer) = cmd.num_groups {
+						frame_state.mark_index_buffer(buffer);
+					}
+				}
+
+				_ => {}
 			}
+		}
+
+		unsafe {
+			let msg = "Frame Evaluate";
+			gl::PushDebugGroup(gl::DEBUG_SOURCE_APPLICATION, 0, msg.len() as i32, msg.as_ptr() as *const _);
 		}
 
 		frame_state.upload_buffers(&mut self.upload_heap);
@@ -157,7 +209,71 @@ impl Context {
 						}
 					}
 				}
+
+				Command::Dispatch(cmd) => {
+					use crate::upload_heap::BufferAllocation;
+
+					let pipeline_def = PipelineDef {
+						vertex: None,
+						fragment: None,
+						compute: Some(cmd.compute_shader),
+					};
+
+					// Maybe this should be a LRU pool of pipelines instead of a created resource
+					let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
+
+					unsafe {
+						gl::BindProgramPipeline(pipeline.name);
+					}
+
+
+					for &(block_binding, buffer) in cmd.block_bindings.iter() {
+						let binding_location = match block_binding {
+							BlockBinding::Explicit(location) => location,
+							BlockBinding::Named(name) => {
+								panic!("Unresolved named binding '{name}'");
+							}
+						};
+
+						let (index, ty) = match binding_location {
+							BindingLocation::Ubo(index) => (index, gl::UNIFORM_BUFFER),
+							BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER),
+						};
+
+						let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
+
+						unsafe {
+							gl::BindBufferRange(ty, index, upload_buffer_name, offset as isize, size as isize);
+						}
+					}
+
+					match cmd.num_groups {
+						DispatchSizeSource::Indirect(buffer) => {
+							let BufferAllocation{offset, ..} = frame_state.resolve_buffer_allocation(buffer);
+
+							unsafe {
+								gl::BindBuffer(gl::DISPATCH_INDIRECT_BUFFER, upload_buffer_name);
+								gl::DispatchComputeIndirect(offset as isize);
+							}
+						}
+
+						DispatchSizeSource::Explicit([x, y, z]) => unsafe {
+							gl::DispatchCompute(x, y, z);
+						}
+					}
+				}
+
+				Command::MemoryBarrier => unsafe {
+					gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+				}
 			}
+		}
+
+		self.upload_heap.notify_finished();
+		frame_state.reset();
+
+		unsafe {
+			gl::PopDebugGroup();
 		}
 	}
 }
