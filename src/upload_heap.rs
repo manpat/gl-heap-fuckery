@@ -11,8 +11,9 @@ pub struct UploadHeap {
 	buffer_usage_counter: usize,
 
 	buffer_ptr: *mut u8,
-	// buffer_invalidate_fence: Option<gl::types::GLsync>,
-	// needs_fence: bool,
+
+	frame_start_cursor: usize,
+	locked_ranges: Vec<LockedRange>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -29,16 +30,11 @@ impl UploadHeap {
 		unsafe {
 			gl::CreateBuffers(1, &mut buffer_name);
 
-			// Specifically not using  gl::DYNAMIC_STORAGE_BIT
-			let flags = gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT | gl::MAP_WRITE_BIT;
-			gl::NamedBufferStorage(buffer_name, UPLOAD_BUFFER_SIZE as isize, std::ptr::null(), flags);
+			let create_flags = gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT | gl::MAP_WRITE_BIT;
+			gl::NamedBufferStorage(buffer_name, UPLOAD_BUFFER_SIZE as isize, std::ptr::null(), create_flags);
 
 			let map_flags = gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT | gl::MAP_WRITE_BIT;
 			buffer_ptr = gl::MapNamedBufferRange(buffer_name, 0, UPLOAD_BUFFER_SIZE as isize, map_flags) as *mut u8;
-
-			// TODO(pat.m): SYNCHRONISATION
-			// This is a bit useless but will ensure buffer_invalidate_fence is always valid
-			// buffer_invalidate_fence = gl::FenceSync(gl::SYNC_GPU_COMMANDS_COMPLETE, 0);
 
 			let debug_label = "Upload Heap";
 			gl::ObjectLabel(gl::BUFFER, buffer_name, debug_label.len() as i32, debug_label.as_ptr() as *const _);
@@ -51,8 +47,9 @@ impl UploadHeap {
 			buffer_usage_counter: 0,
 
 			buffer_ptr,
-			// buffer_invalidate_fence: None,
-			// needs_fence: true,
+
+			frame_start_cursor: 0,
+			locked_ranges: Vec::new(),
 		}
 	}
 
@@ -88,10 +85,40 @@ impl UploadHeap {
 		self.buffer_usage_counter += self.buffer_cursor.checked_sub(pre_alignment_cursor)
 			.unwrap_or(size + UPLOAD_BUFFER_SIZE - pre_alignment_cursor);
 
-		BufferAllocation {
+		let allocation = BufferAllocation {
 			offset,
 			size,
+		};
+
+		// Check if we need to wait for the earliest range to be used.
+		while let Some(locked_range) = self.locked_ranges.first()
+			&& locked_range.contains_allocation(&allocation)
+		{
+			let range = self.locked_ranges.remove(0);
+
+			unsafe {
+				// Eager check to see if the fence has already been signaled
+				let result = gl::ClientWaitSync(range.fence, gl::SYNC_FLUSH_COMMANDS_BIT, 0);
+				if result != gl::ALREADY_SIGNALED && result != gl::CONDITION_SATISFIED {
+					print!("Upload heap sync");
+
+					// wait in blocks of 0.1ms
+					let timeout_ns = 100_000;
+
+					while let result = gl::ClientWaitSync(range.fence, gl::SYNC_FLUSH_COMMANDS_BIT, timeout_ns)
+						&& result != gl::ALREADY_SIGNALED && result != gl::CONDITION_SATISFIED
+					{
+						print!(".");
+					}
+
+					println!("!");
+				}
+
+				gl::DeleteSync(range.fence);
+			}
 		}
+
+		allocation
 	}
 
 	pub fn push_data<T>(&mut self, data: &[T], alignment: usize) -> BufferAllocation
@@ -101,17 +128,8 @@ impl UploadHeap {
 		let allocation = self.reserve_space(byte_size, alignment);
 
 		unsafe {
-			// let access = gl::MAP_WRITE_BIT
-			// 	| gl::MAP_UNSYNCHRONIZED_BIT
-			// 	| gl::MAP_INVALIDATE_RANGE_BIT;
-
-			// // TODO(pat.m): map less
-			// let ptr = gl::MapNamedBufferRange(self.buffer_name, allocation.offset as isize, allocation.size as isize, access);
-
 			let dest_ptr = self.buffer_ptr.offset(allocation.offset as isize);
 			std::ptr::copy(data.as_ptr(), dest_ptr.cast(), data.len());
-
-			// gl::UnmapNamedBuffer(self.buffer_name);
 		}
 
 		self.data_pushed_counter += byte_size;
@@ -120,12 +138,44 @@ impl UploadHeap {
 	}
 
 	pub fn notify_finished(&mut self) {
-		// if !self.needs_fence {
-		// 	return;
-		// }
+		let fence = unsafe {
+			gl::FenceSync(gl::SYNC_GPU_COMMANDS_COMPLETE, 0)
+		};
 
-		// self.needs_fence = false;
+		let range_size = self.buffer_cursor.checked_sub(self.frame_start_cursor)
+			.unwrap_or(UPLOAD_BUFFER_SIZE - self.frame_start_cursor + self.buffer_cursor);
 
-		// if let Some() = self.buffer_invalidate_fence
+		self.locked_ranges.push(LockedRange {
+			fence,
+			start: self.frame_start_cursor,
+			size: range_size,
+		});
+
+		self.frame_start_cursor = self.buffer_cursor;
+	}
+}
+
+
+
+
+
+#[derive(Debug)]
+struct LockedRange {
+	fence: gl::types::GLsync,
+
+	start: usize,
+	size: usize, // NOTE: may wrap
+}
+
+impl LockedRange {
+	fn contains_allocation(&self, allocation: &BufferAllocation) -> bool {
+		let allocation_end = allocation.offset + allocation.size;
+		let range_end = self.start + self.size;
+
+		if range_end <= UPLOAD_BUFFER_SIZE {
+			allocation.offset < range_end && allocation_end >= self.start
+		} else {
+			allocation.offset >= self.start || allocation_end < (range_end - UPLOAD_BUFFER_SIZE)
+		}
 	}
 }
