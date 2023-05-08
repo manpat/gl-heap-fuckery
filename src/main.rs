@@ -1,3 +1,5 @@
+#![feature(let_chains)]
+
 mod main_loop;
 mod resource_manager;
 mod commands;
@@ -22,9 +24,6 @@ fn main() -> anyhow::Result<()> {
 struct Game {
 	context: Context,
 	frame_state: FrameState,
-
-	// pipeline: PipelineHandle,
-	// indexed_pipeline: PipelineHandle,
 
 	vert_shader: ShaderHandle,
 	vert_indexed_shader: ShaderHandle,
@@ -57,26 +56,9 @@ impl Game {
 		let vert_indexed_shader = context.resource_manager.load_shader(&vert_indexed_shader_def)?;
 		let frag_shader = context.resource_manager.load_shader(&frag_shader_def)?;
 
-		// let pipeline_def = PipelineDef {
-		// 	vertex: Some(vert_shader),
-		// 	fragment: Some(frag_shader),
-		// 	compute: None,
-		// };
-
-		// let indexed_pipeline_def = PipelineDef {
-		// 	vertex: Some(vert_indexed_shader),
-		// 	fragment: Some(frag_shader),
-		// 	compute: None,
-		// };
-
-		// let pipeline = context.create_pipeline(&pipeline_def)?;
-		// let indexed_pipeline = context.create_pipeline(&indexed_pipeline_def)?;
-
 		unsafe {
 			gl::Enable(gl::DEPTH_TEST);
 		}
-
-		dbg!(&context);
 
 		Ok(Game {
 			context,
@@ -124,9 +106,9 @@ impl main_loop::MainLoop for Game {
 				.elements(6)
 				.instances(1)
 				.ubo(0, proj_view_buffer)
-				.ubo(1, &colour_buffer)
-				.ssbo(0, &vertex_buffer)
-				.ssbo(1, quad_index_buffer);
+				.buffer("PerDrawUniforms", &colour_buffer)
+				.buffer("Positions", &vertex_buffer)
+				.buffer(BindingLocation::Ssbo(1), quad_index_buffer);
 		}
 
 		{

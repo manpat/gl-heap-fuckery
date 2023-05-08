@@ -1,6 +1,6 @@
 use std::mem::ManuallyDrop;
 
-use crate::resource_manager::{ShaderHandle};
+use crate::resource_manager::{ShaderHandle, BindingLocation};
 use crate::upload_heap::{UploadHeap, BufferAllocation, UPLOAD_BUFFER_SIZE};
 
 
@@ -87,9 +87,7 @@ impl FrameState {
 				num_instances: 1,
 
 				index_buffer: None,
-
-				ssbo_bindings: Vec::new(),
-				ubo_bindings: Vec::new(),
+				block_bindings: Vec::new(),
 			})
 		}
 	}
@@ -258,6 +256,23 @@ enum ReservedBuffer {
 }
 
 
+#[derive(Debug, Copy, Clone)]
+pub enum BlockBinding {
+	Explicit(BindingLocation),
+	Named(&'static str),
+}
+
+impl From<BindingLocation> for BlockBinding {
+	fn from(o: BindingLocation) -> BlockBinding {
+		BlockBinding::Explicit(o)
+	}
+}
+
+impl From<&'static str> for BlockBinding {
+	fn from(o: &'static str) -> BlockBinding {
+		BlockBinding::Named(o)
+	}
+}
 
 
 #[derive(Debug)]
@@ -272,8 +287,7 @@ pub struct DrawCmd {
 	// TODO(pat.m): how to determine element type
 	pub index_buffer: Option<BufferHandle>,
 
-	pub ssbo_bindings: Vec<(u32, BufferHandle)>,
-	pub ubo_bindings: Vec<(u32, BufferHandle)>,
+	pub block_bindings: Vec<(BlockBinding, BufferHandle)>,
 }
 
 
@@ -312,15 +326,18 @@ impl<'fs> DrawCmdBuilder<'fs> {
 		self
 	}
 
-	pub fn ubo(&mut self, index: u32, buffer: impl IntoBufferHandle) -> &mut Self {
+	pub fn buffer(&mut self, binding: impl Into<BlockBinding>, buffer: impl IntoBufferHandle) -> &mut Self {
 		let buffer_handle = buffer.into_buffer_handle(self.frame_state);
-		self.cmd.ubo_bindings.push((index, buffer_handle));
+		let binding = binding.into();
+		self.cmd.block_bindings.push((binding, buffer_handle));
 		self
 	}
 
+	pub fn ubo(&mut self, index: u32, buffer: impl IntoBufferHandle) -> &mut Self {
+		self.buffer(BindingLocation::Ubo(index), buffer)
+	}
+
 	pub fn ssbo(&mut self, index: u32, buffer: impl IntoBufferHandle) -> &mut Self {
-		let buffer_handle = buffer.into_buffer_handle(self.frame_state);
-		self.cmd.ssbo_bindings.push((index, buffer_handle));
-		self
+		self.buffer(BindingLocation::Ssbo(index), buffer)
 	}
 }

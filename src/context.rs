@@ -36,16 +36,42 @@ impl Context {
 	}
 
 	pub fn end_frame(&mut self, frame_state: &mut FrameState) {
+		use crate::commands::BlockBinding;
+
 		// TODO(pat.m): non-ubo data could be interleaved with ubo data to save space
 
-		let commands = std::mem::replace(&mut frame_state.commands, Vec::new());
+		let mut commands = std::mem::replace(&mut frame_state.commands, Vec::new());
+
+		// Resolve named buffer block bindings
+		for cmd in commands.iter_mut() {
+			match cmd {
+				Command::Draw(cmd) => {
+					for (binding, _) in cmd.block_bindings.iter_mut() {
+						if let BlockBinding::Named(name) = binding {
+							let pipeline_def = PipelineDef {
+								vertex: Some(cmd.vertex_shader),
+								fragment: cmd.fragment_shader,
+								compute: None,
+							};
+
+							let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
+							let block = pipeline.composite_blocks.get(*name).unwrap();
+
+							*binding = BlockBinding::Explicit(block.binding_location);
+						}
+					}
+				}
+			}
+		}
 
 		// Upload UBOs first since they have the greatest alignment requirements
 		for cmd in commands.iter() {
 			match cmd {
 				Command::Draw(cmd) => {
-					for (_, buffer) in cmd.ubo_bindings.iter() {
-						frame_state.mark_ubo(*buffer);
+					for (binding, buffer) in cmd.block_bindings.iter() {
+						if let BlockBinding::Explicit(BindingLocation::Ubo(_)) = binding {
+							frame_state.mark_ubo(*buffer);
+						}
 					}
 				}
 			}
@@ -54,8 +80,10 @@ impl Context {
 		for cmd in commands.iter() {
 			match cmd {
 				Command::Draw(cmd) => {
-					for (_, buffer) in cmd.ssbo_bindings.iter() {
-						frame_state.mark_ssbo(*buffer);
+					for (binding, buffer) in cmd.block_bindings.iter() {
+						if let BlockBinding::Explicit(BindingLocation::Ssbo(_)) = binding {
+							frame_state.mark_ssbo(*buffer);
+						}
 					}
 				}
 			}
@@ -87,29 +115,30 @@ impl Context {
 					};
 
 					// Maybe this should be a LRU pool of pipelines instead of a created resource
-					let pipeline_handle = self.resource_manager.create_pipeline(&pipeline_def)
-						.unwrap();
-
-					let name = self.resource_manager.resolve_pipeline_name(pipeline_handle).unwrap();
+					let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
 
 					unsafe {
-						gl::BindProgramPipeline(name);
+						gl::BindProgramPipeline(pipeline.name);
 					}
 
 
-					for &(index, buffer) in cmd.ubo_bindings.iter() {
+					for &(block_binding, buffer) in cmd.block_bindings.iter() {
+						let binding_location = match block_binding {
+							BlockBinding::Explicit(location) => location,
+							BlockBinding::Named(name) => {
+								panic!("Unresolved named binding '{name}'");
+							}
+						};
+
+						let (index, ty) = match binding_location {
+							BindingLocation::Ubo(index) => (index, gl::UNIFORM_BUFFER),
+							BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER),
+						};
+
 						let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
 
 						unsafe {
-							gl::BindBufferRange(gl::UNIFORM_BUFFER, index, upload_buffer_name, offset as isize, size as isize);
-						}
-					}
-
-					for &(index, buffer) in cmd.ssbo_bindings.iter() {
-						let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
-
-						unsafe {
-							gl::BindBufferRange(gl::SHADER_STORAGE_BUFFER, index, upload_buffer_name, offset as isize, size as isize);
+							gl::BindBufferRange(ty, index, upload_buffer_name, offset as isize, size as isize);
 						}
 					}
 
@@ -131,57 +160,4 @@ impl Context {
 			}
 		}
 	}
-
-	// pub fn bind_pipeline(&mut self, handle: PipelineHandle) {
-	// 	let name = self.resource_manager.resolve_pipeline_name(handle).unwrap();
-
-	// 	unsafe {
-	// 		gl::BindProgramPipeline(name);
-	// 	}
-	// }
-
-	// fn push_data<T>(&mut self, data: &[T], alignment: isize) -> isize
-	// 	where T: Copy
-	// {
-	// 	Self::push_data_inner(data, alignment, self.upload_buffer_name, &mut self.upload_buffer_cursor,
-	// 		&mut self.data_pushed_counter)
-	// }
-
-	// pub fn push_ssbo<T>(&mut self, index: u32, data: &[T])
-	// 	where T: Copy
-	// {
-	// 	let offset_bytes = self.push_data(data, 32);
-	// 	let size_bytes = (data.len() * std::mem::size_of::<T>()) as isize;
-
-	// 	unsafe {
-	// 		gl::BindBufferRange(gl::SHADER_STORAGE_BUFFER, index, self.upload_buffer_name, offset_bytes, size_bytes);
-	// 	}
-	// }
-
-	// pub fn push_ubo<T>(&mut self, index: u32, data: &[T])
-	// 	where T: Copy
-	// {
-	// 	let offset_bytes = self.push_data(data, self.uniform_buffer_offset_alignment);
-	// 	let size_bytes = (data.len() * std::mem::size_of::<T>()) as isize;
-
-	// 	unsafe {
-	// 		gl::BindBufferRange(gl::UNIFORM_BUFFER, index, self.upload_buffer_name, offset_bytes, size_bytes);
-	// 	}
-	// }
-
-	// pub fn draw(&mut self, vertex_count: u32, instance_count: u32) {
-	// 	unsafe {
-	// 		gl::DrawArraysInstanced(gl::TRIANGLES, 0, vertex_count as i32, instance_count as i32);
-	// 	}
-	// }
-
-	// pub fn draw_indexed(&mut self, indices: &[u16], instance_count: u32) {
-	// 	let offset_bytes = self.push_data(indices, 2);
-	// 	let offset_ptr = offset_bytes as usize as *const _;
-
-	// 	unsafe {
-	// 		gl::VertexArrayElementBuffer(self.vao_name, self.upload_buffer_name);
-	// 		gl::DrawElementsInstanced(gl::TRIANGLES, indices.len() as _, gl::UNSIGNED_SHORT, offset_ptr, instance_count as i32);
-	// 	}
-	// }
 }
