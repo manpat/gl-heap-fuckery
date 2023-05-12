@@ -16,10 +16,13 @@ use raw_window_handle::HasRawWindowHandle;
 
 use std::num::NonZeroU32;
 
+use common::math::Vec2i;
+
 
 
 pub trait MainLoop {
 	fn present(&mut self);
+	fn resize(&mut self, new_size: Vec2i) {}
 }
 
 pub fn run<F, M>(start_main_loop: F) -> anyhow::Result<()>
@@ -120,6 +123,10 @@ pub fn run<F, M>(start_main_loop: F) -> anyhow::Result<()>
 			Event::MainEventsCleared => {
 				main_loop.present();
 				surface.swap_buffers(&context).unwrap();
+			}
+
+			Event::WindowEvent { event: WindowEvent::Resized(physical_size), .. } => {
+				main_loop.resize(Vec2i::new(physical_size.width as i32, physical_size.height as i32));
 			}
 
 			_ => {}

@@ -24,6 +24,7 @@ fn main() -> anyhow::Result<()> {
 struct Game {
 	context: Context,
 	frame_state: FrameState,
+	backbuffer_size: Vec2i,
 
 	vert_shader: ShaderHandle,
 	vert_indexed_shader: ShaderHandle,
@@ -79,6 +80,7 @@ impl Game {
 		Ok(Game {
 			context,
 			frame_state,
+			backbuffer_size: Vec2i::splat(1),
 
 			vert_shader,
 			vert_indexed_shader,
@@ -99,11 +101,14 @@ impl main_loop::MainLoop for Game {
 		self.context.start_frame();
 
 		unsafe {
+			gl::Viewport(0, 0, self.backbuffer_size.x, self.backbuffer_size.y);
 			gl::ClearColor(1.0, 0.5, 1.0, 1.0);
 			gl::Clear(gl::COLOR_BUFFER_BIT|gl::DEPTH_BUFFER_BIT);
 		}
 
-		let projection_view = Mat4::perspective(PI/3.0, 1.0, 0.01, 100.0)
+		let aspect = self.backbuffer_size.x as f32 / self.backbuffer_size.y as f32;
+
+		let projection_view = Mat4::perspective(PI/3.0, aspect, 0.01, 100.0)
 			* Mat4::translate(Vec3::from_z(-2.0))
 			* Mat4::rotate_y(self.time);
 
@@ -166,6 +171,10 @@ impl main_loop::MainLoop for Game {
 		}
 
 		self.context.end_frame(&mut self.frame_state);
+	}
+
+	fn resize(&mut self, size: Vec2i) {
+		self.backbuffer_size = size;
 	}
 }
 
