@@ -78,8 +78,6 @@ impl Context {
 						}
 					}
 				}
-
-				_ => {}
 			}
 		}
 
@@ -101,8 +99,6 @@ impl Context {
 						}
 					}
 				}
-
-				_ => {}
 			}
 		}
 
@@ -123,8 +119,6 @@ impl Context {
 						}
 					}
 				}
-
-				_ => {}
 			}
 		}
 
@@ -141,8 +135,6 @@ impl Context {
 						frame_state.mark_index_buffer(buffer);
 					}
 				}
-
-				_ => {}
 			}
 		}
 
@@ -293,10 +285,6 @@ impl Context {
 							gl::DispatchCompute(x, y, z);
 						}
 					}
-				}
-
-				Command::MemoryBarrier => unsafe {
-					gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
 				}
 			}
 		}

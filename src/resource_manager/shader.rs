@@ -35,6 +35,7 @@ pub struct BlockDescription {
 pub struct ShaderObject {
 	pub name: u32,
 	pub blocks: HashMap<String, BlockDescription>,
+	pub workgroup_size: Option<[u32; 3]>,
 }
 
 
@@ -75,17 +76,21 @@ pub fn compile_shader(resource_manager: &mut ResourceManager, def: &ShaderDef) -
 		}
 	}
 
-	let blocks = reflect_shader(program_name)?;
+	let blocks = reflect_blocks(program_name)?;
 
 	Ok(ShaderObject {
 		name: program_name,
 		blocks,
+		workgroup_size: match def.shader_type {
+			ShaderType::Compute => Some(reflect_workgroup_size(program_name)),
+			_ => None,
+		},
 	})
 }
 
 
 
-fn reflect_shader(program_name: u32) -> anyhow::Result<HashMap<String, BlockDescription>> {
+fn reflect_blocks(program_name: u32) -> anyhow::Result<HashMap<String, BlockDescription>> {
 	let mut blocks = HashMap::new();
 
 	let mut num_uniform_blocks = 0;
@@ -162,4 +167,15 @@ fn reflect_shader(program_name: u32) -> anyhow::Result<HashMap<String, BlockDesc
 	}
 
 	Ok(blocks)
+}
+
+
+fn reflect_workgroup_size(program_name: u32) -> [u32; 3] {
+	let mut workgroup_size = [0u32; 3];
+
+	unsafe {
+		gl::GetProgramiv(program_name, gl::COMPUTE_WORK_GROUP_SIZE, workgroup_size.as_mut_ptr() as *mut i32);
+	}
+
+	workgroup_size
 }

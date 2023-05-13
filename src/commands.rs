@@ -8,8 +8,6 @@ use crate::upload_heap::{UploadHeap, BufferAllocation, UPLOAD_BUFFER_SIZE};
 pub enum Command {
 	Draw(DrawCmd),
 	Dispatch(DispatchCmd),
-
-	MemoryBarrier,
 }
 
 
@@ -106,10 +104,6 @@ impl FrameState {
 				block_bindings: Vec::new(),
 			})
 		}
-	}
-
-	pub fn memory_barrier(&mut self) {
-		self.push_cmd(Command::MemoryBarrier);
 	}
 }
 
