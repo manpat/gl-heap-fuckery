@@ -15,6 +15,28 @@ pub struct ShaderDef {
 	pub shader_type: ShaderType,
 }
 
+impl ShaderDef {
+	pub fn vertex(path: impl Into<ResourcePath>) -> ShaderDef {
+		ShaderDef {
+			path: path.into(),
+			shader_type: ShaderType::Vertex,
+		}
+	}
+
+	pub fn fragment(path: impl Into<ResourcePath>) -> ShaderDef {
+		ShaderDef {
+			path: path.into(),
+			shader_type: ShaderType::Fragment,
+		}
+	}
+
+	pub fn compute(path: impl Into<ResourcePath>) -> ShaderDef {
+		ShaderDef {
+			path: path.into(),
+			shader_type: ShaderType::Compute,
+		}
+	}
+}
 
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

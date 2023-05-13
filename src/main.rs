@@ -41,30 +41,12 @@ impl Game {
 		let mut context = Context::new()?;
 		let frame_state = FrameState::new();
 
-		let vert_shader_def = ShaderDef {
-			path: ResourcePath::from("shaders/test.vert.glsl"),
-			shader_type: ShaderType::Vertex,
-		};
+		let vert_shader_def = ShaderDef::vertex("shaders/test.vert.glsl");
+		let vert_indexed_shader_def = ShaderDef::vertex("shaders/test_indexed.vert.glsl");
+		let frag_shader_def = ShaderDef::fragment("shaders/test.frag.glsl");
 
-		let vert_indexed_shader_def = ShaderDef {
-			path: ResourcePath::from("shaders/test_indexed.vert.glsl"),
-			shader_type: ShaderType::Vertex,
-		};
-
-		let frag_shader_def = ShaderDef {
-			path: ResourcePath::from("shaders/test.frag.glsl"),
-			shader_type: ShaderType::Fragment,
-		};
-
-		let gen_args_compute_shader_def = ShaderDef {
-			path: ResourcePath::from("shaders/gen_args.cs.glsl"),
-			shader_type: ShaderType::Compute,
-		};
-
-		let gen_color_compute_shader_def = ShaderDef {
-			path: ResourcePath::from("shaders/gen_color.cs.glsl"),
-			shader_type: ShaderType::Compute,
-		};
+		let gen_args_compute_shader_def = ShaderDef::compute("shaders/gen_args.cs.glsl");
+		let gen_color_compute_shader_def = ShaderDef::compute("shaders/gen_color.cs.glsl");
 
 		let vert_shader = context.resource_manager.load_shader(&vert_shader_def)?;
 		let vert_indexed_shader = context.resource_manager.load_shader(&vert_indexed_shader_def)?;
@@ -137,9 +119,8 @@ impl main_loop::MainLoop for Game {
 
 			self.frame_state.draw(self.vert_shader, self.frag_shader)
 				.elements(6)
-				.instances(1)
 				.ubo(0, proj_view_buffer)
-				.buffer("PerDrawUniforms", colour_buffer) 
+				.buffer("PerDrawUniforms", colour_buffer)
 				.buffer("Positions", &vertex_buffer)
 				.buffer(BindingLocation::Ssbo(1), quad_index_buffer);
 		}
