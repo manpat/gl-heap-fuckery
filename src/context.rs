@@ -1,5 +1,5 @@
 use crate::resource_manager::*;
-use crate::commands::{Command, FrameState};
+use crate::commands::{Command, FrameState, BufferHandle};
 use crate::upload_heap::UploadHeap;
 
 
@@ -155,6 +155,8 @@ impl Context {
 
 		let upload_buffer_name = self.upload_heap.buffer_name();
 
+		let mut barrier_tracker = ResourceBarrierTracker::new();
+
 		for cmd in commands {
 			match cmd {
 				Command::Draw(cmd) => {
@@ -187,6 +189,19 @@ impl Context {
 							BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER),
 						};
 
+						match binding_location {
+							BindingLocation::Ubo(_) => {
+								barrier_tracker.insert_barrier(buffer, gl::UNIFORM_BARRIER_BIT);
+							}
+
+							BindingLocation::Ssbo(_) => {
+								barrier_tracker.insert_barrier(buffer, gl::SHADER_STORAGE_BARRIER_BIT);
+
+								// TODO(pat.m): check for readonly flags
+								barrier_tracker.mark_buffer(buffer);
+							}
+						}
+
 						let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
 
 						unsafe {
@@ -197,6 +212,8 @@ impl Context {
 					if let Some(buffer) = cmd.index_buffer {
 						let BufferAllocation{offset, ..} = frame_state.resolve_buffer_allocation(buffer);
 						let offset_ptr = offset as *const _;
+
+						barrier_tracker.insert_barrier(buffer, gl::ELEMENT_ARRAY_BARRIER_BIT);
 
 						unsafe {
 							gl::VertexArrayElementBuffer(self.vao_name, upload_buffer_name);
@@ -240,6 +257,19 @@ impl Context {
 							BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER),
 						};
 
+						match binding_location {
+							BindingLocation::Ubo(_) => {
+								barrier_tracker.insert_barrier(buffer, gl::UNIFORM_BARRIER_BIT);
+							}
+
+							BindingLocation::Ssbo(_) => {
+								barrier_tracker.insert_barrier(buffer, gl::SHADER_STORAGE_BARRIER_BIT);
+
+								// TODO(pat.m): check for readonly flags
+								barrier_tracker.mark_buffer(buffer);
+							}
+						}
+
 						let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
 
 						unsafe {
@@ -250,6 +280,8 @@ impl Context {
 					match cmd.num_groups {
 						DispatchSizeSource::Indirect(buffer) => {
 							let BufferAllocation{offset, ..} = frame_state.resolve_buffer_allocation(buffer);
+
+							barrier_tracker.insert_barrier(buffer, gl::COMMAND_BARRIER_BIT);
 
 							unsafe {
 								gl::BindBuffer(gl::DISPATCH_INDIRECT_BUFFER, upload_buffer_name);
@@ -274,6 +306,48 @@ impl Context {
 
 		unsafe {
 			gl::PopDebugGroup();
+		}
+	}
+}
+
+
+
+use std::collections::HashMap;
+
+#[derive(Debug, Default)]
+struct ResourceBarrierTracker {
+	buffers: HashMap<BufferHandle, bool>,
+}
+
+impl ResourceBarrierTracker {
+	fn new() -> Self {
+		Self::default()
+	}
+
+	fn mark_buffer(&mut self, handle: BufferHandle) {
+		self.buffers.insert(handle, true);
+	}
+
+	fn insert_barrier(&mut self, handle: BufferHandle, barrier_bits: u32) {
+		let should_insert = self.buffers.insert(handle, false)
+			.unwrap_or(false);
+
+		if !should_insert {
+			return;
+		}
+
+		const BY_REGION_FLAGS: u32 = gl::SHADER_STORAGE_BARRIER_BIT | gl::UNIFORM_BARRIER_BIT
+			| gl::FRAMEBUFFER_BARRIER_BIT | gl::ATOMIC_COUNTER_BARRIER_BIT
+			| gl::SHADER_IMAGE_ACCESS_BARRIER_BIT | gl::TEXTURE_FETCH_BARRIER_BIT;
+
+		if barrier_bits & BY_REGION_FLAGS == barrier_bits {
+			unsafe {
+				gl::MemoryBarrierByRegion(barrier_bits);
+			}
+		} else {
+			unsafe {
+				gl::MemoryBarrier(barrier_bits);
+			}
 		}
 	}
 }

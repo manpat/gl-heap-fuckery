@@ -211,7 +211,7 @@ impl FrameState {
 
 
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum BufferHandle {
 	Streamed(usize),
 	Reserved(usize),

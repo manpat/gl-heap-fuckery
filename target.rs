@@ -70,13 +70,26 @@ impl MyView {
 
 
 		let compute_result_buffer = ctx.reserve_transient_buffer(128);
-		let compute_indirect = ctx.committed_buffer(4*3);
 
-		ctx.dispatch(compute_shader)
-			.indirect(compute_indirect) // optionally bind indirect buffer
+		ctx.dispatch(self.compute_shader)
+			.indirect(self.compute_indirect) // optionally bind indirect buffer
 			.groups(10, 10, 1) // or, explicit direct dispatch args
 			.buffer("my_output", compute_result_buffer)
 			.image("t_image", target_image)
 			.ssbo(1, prepared_struct_buffer); // buffer binding same as before
 	}
+}
+
+
+
+
+
+struct RenderTargetDef {
+	format: ImageFormat,
+	size: ImageSize,
+}
+
+struct PipelineStageDef {
+	name: String,
+
 }

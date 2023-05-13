@@ -122,13 +122,9 @@ impl main_loop::MainLoop for Game {
 			.groups(1, 1, 1)
 			.buffer("ArgsBuffer", args_buffer);
 
-		self.frame_state.memory_barrier();
-
 		self.frame_state.dispatch(self.gen_color_compute_shader)
 			.indirect(args_buffer)
 			.buffer("ColorBuffer", colour_buffer);
-
-		self.frame_state.memory_barrier();
 
 		{
 			let vertex_buffer = [
