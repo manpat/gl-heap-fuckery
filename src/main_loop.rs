@@ -89,13 +89,13 @@ pub fn run<F, M>(start_main_loop: F) -> anyhow::Result<()>
 		gl::Enable(gl::DEBUG_OUTPUT_SYNCHRONOUS);
 
 		// Disable performance messages
-		gl::DebugMessageControl(
-			gl::DONT_CARE,
-			gl::DEBUG_TYPE_PERFORMANCE,
-			gl::DONT_CARE,
-			0, std::ptr::null(),
-			0 // false
-		);
+		// gl::DebugMessageControl(
+		// 	gl::DONT_CARE,
+		// 	gl::DEBUG_TYPE_PERFORMANCE,
+		// 	gl::DONT_CARE,
+		// 	0, std::ptr::null(),
+		// 	0 // false
+		// );
 
 		// Disable notification messages
 		gl::DebugMessageControl(
