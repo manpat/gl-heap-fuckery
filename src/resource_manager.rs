@@ -11,6 +11,7 @@ pub type ResourcePathRef = std::path::Path;
 pub use shader::{ShaderType, ShaderDef, BindingLocation};
 pub use pipeline::{PipelineDef, PipelineObject};
 pub use sampler::{SamplerDef, AddressingMode, FilterMode, SamplerObject};
+pub use self::image::{ImageDef, ImageObject};
 
 use shader::ShaderObject;
 
@@ -19,6 +20,9 @@ use shader::ShaderObject;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct ShaderHandle(pub u32);
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct ImageHandle(pub u32);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct PipelineHandle(pub u32);
@@ -36,6 +40,10 @@ pub struct ResourceManager {
 	pipeline_objects: HashMap<PipelineDef, PipelineObject>,
 
 	sampler_objects: HashMap<SamplerDef, SamplerObject>,
+
+	image_defs: HashMap<ImageDef, ImageHandle>,
+	image_objects: HashMap<ImageHandle, ImageObject>,
+	image_counter: u32,
 }
 
 impl ResourceManager {
@@ -53,6 +61,10 @@ impl ResourceManager {
 
 			pipeline_objects: HashMap::default(),
 			sampler_objects: HashMap::default(),
+
+			image_defs: HashMap::default(),
+			image_objects: HashMap::default(),
+			image_counter: 0,
 		})
 	}
 
@@ -77,6 +89,22 @@ impl ResourceManager {
 		Ok(handle)
 	}
 
+	pub fn load_image(&mut self, def: &ImageDef) -> anyhow::Result<ImageHandle> {
+		if let Some(handle) = self.image_defs.get(def) {
+			return Ok(*handle);
+		}
+
+		let object = self::image::load_raw(def)?;
+
+		let handle = ImageHandle(self.image_counter);
+		self.image_counter += 1;
+
+		self.image_defs.insert(def.clone(), handle);
+		self.image_objects.insert(handle, object);
+
+		Ok(handle)
+	}
+
 	// TODO(pat.m): maybe I want to do away with fixed pipelines and just bind PipelineDefs instead
 	pub fn get_pipeline<'s>(&'s mut self, def: &'_ PipelineDef) -> anyhow::Result<&'s PipelineObject> {
 		// HACK: I can't figure out the lifetimes for this - something goes weird if I try to use if let = get here
@@ -97,6 +125,10 @@ impl ResourceManager {
 
 	pub fn resolve_shader(&self, handle: ShaderHandle) -> Option<&ShaderObject> {
 		self.shader_objects.get(&handle)
+	}
+
+	pub fn resolve_image(&self, handle: ImageHandle) -> Option<&ImageObject> {
+		self.image_objects.get(&handle)
 	}
 }
 
