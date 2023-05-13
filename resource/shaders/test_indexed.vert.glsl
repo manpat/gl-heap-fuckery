@@ -23,7 +23,7 @@ layout(std430, binding=1) readonly buffer InstanceData {
 
 void main() {
 	const vec4 position = u_positions[gl_VertexID];
-	gl_Position = u_projection_view * (position + vec2(0.0, -0.1 * float(gl_InstanceID)).xxyx);
+	gl_Position = u_projection_view * (position + vec2(0.0, 0.1 * float(gl_InstanceID)).xxyx);
 
 	v_color = u_colors[gl_InstanceID];
 }

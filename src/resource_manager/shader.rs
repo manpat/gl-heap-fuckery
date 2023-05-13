@@ -50,6 +50,7 @@ pub enum BindingLocation {
 pub struct BlockDescription {
 	pub binding_location: BindingLocation,
 	pub total_size: u32,
+	pub is_read_write: bool,
 }
 
 
@@ -98,7 +99,7 @@ pub fn compile_shader(resource_manager: &mut ResourceManager, def: &ShaderDef) -
 		}
 	}
 
-	let blocks = reflect_blocks(program_name)?;
+	let blocks = reflect_blocks(program_name, &content)?;
 
 	Ok(ShaderObject {
 		name: program_name,
@@ -112,7 +113,7 @@ pub fn compile_shader(resource_manager: &mut ResourceManager, def: &ShaderDef) -
 
 
 
-fn reflect_blocks(program_name: u32) -> anyhow::Result<HashMap<String, BlockDescription>> {
+fn reflect_blocks(program_name: u32, content: &str) -> anyhow::Result<HashMap<String, BlockDescription>> {
 	let mut blocks = HashMap::new();
 
 	let mut num_uniform_blocks = 0;
@@ -153,6 +154,7 @@ fn reflect_blocks(program_name: u32) -> anyhow::Result<HashMap<String, BlockDesc
 		blocks.insert(name, BlockDescription {
 			binding_location: BindingLocation::Ubo(buffer_binding as u32),
 			total_size: buffer_data_size as u32,
+			is_read_write: false,
 		});
 	}
 
@@ -181,10 +183,12 @@ fn reflect_blocks(program_name: u32) -> anyhow::Result<HashMap<String, BlockDesc
 
 		str_buf.pop(); // Remove null terminator
 		let name = String::from_utf8(str_buf)?;
+		let is_readonly = buffer_block_has_readonly_keyword(&name, content);
 
 		blocks.insert(name, BlockDescription {
 			binding_location: BindingLocation::Ssbo(buffer_binding as u32),
 			total_size: buffer_data_size as u32,
+			is_read_write: !is_readonly,
 		});
 	}
 
@@ -200,4 +204,29 @@ fn reflect_workgroup_size(program_name: u32) -> [u32; 3] {
 	}
 
 	workgroup_size
+}
+
+
+// HACK: opengl doesn't provide a way to query the storage qualifiers for interface blocks, so we have to parse them out ourselves
+fn buffer_block_has_readonly_keyword(name: &str, content: &str) -> bool {
+	for (idx, _) in content.match_indices("buffer") {
+		// Read forward one token to see if we're looking at the right buffer block
+		let Some((parsed_name, _)) = content[idx + "buffer".len() ..].trim_start()
+			.split_once(|c: char| c.is_whitespace() || c == '{') else { continue };
+
+		if parsed_name != name {
+			continue
+		}
+
+		// Find end of previous declaration.
+		let scan_begin = content[..idx].rfind(|c: char| c == ';').unwrap_or(0);
+
+		let has_keyword = content[scan_begin..idx].split_whitespace()
+			.rfind(|&keyword| keyword == "readonly")
+			.is_some();
+
+		return has_keyword;
+	}
+
+	false
 }

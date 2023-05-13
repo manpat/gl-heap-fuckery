@@ -15,6 +15,16 @@ pub struct PipelineObject {
 	pub composite_blocks: HashMap<String, BlockDescription>,
 }
 
+impl PipelineObject {
+	pub fn block_by_name(&self, name: &str) -> Option<&BlockDescription> {
+		self.composite_blocks.get(name)
+	}
+
+	pub fn block_by_binding_location(&self, loc: super::shader::BindingLocation) -> Option<&BlockDescription> {
+		self.composite_blocks.values().find(move |desc| desc.binding_location == loc)
+	}
+}
+
 
 pub fn create_pipeline(resource_manager: &ResourceManager, def: &PipelineDef) -> anyhow::Result<PipelineObject> {
 	let mut pipeline_name = 0;

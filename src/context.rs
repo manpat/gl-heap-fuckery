@@ -55,7 +55,7 @@ impl Context {
 							};
 
 							let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
-							let block = pipeline.composite_blocks.get(*name).unwrap();
+							let block = pipeline.block_by_name(*name).unwrap();
 
 							*binding = BlockBinding::Explicit(block.binding_location);
 						}
@@ -72,7 +72,7 @@ impl Context {
 							};
 
 							let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
-							let block = pipeline.composite_blocks.get(*name).unwrap();
+							let block = pipeline.block_by_name(*name).unwrap();
 
 							*binding = BlockBinding::Explicit(block.binding_location);
 						}
@@ -138,10 +138,10 @@ impl Context {
 			}
 		}
 
-		unsafe {
-			let msg = "Frame Evaluate";
-			gl::PushDebugGroup(gl::DEBUG_SOURCE_APPLICATION, 0, msg.len() as i32, msg.as_ptr() as *const _);
-		}
+		// unsafe {
+		// 	let msg = "Frame Evaluate";
+		// 	gl::PushDebugGroup(gl::DEBUG_SOURCE_APPLICATION, 0, msg.len() as i32, msg.as_ptr() as *const _);
+		// }
 
 		frame_state.upload_buffers(&mut self.upload_heap);
 
@@ -176,22 +176,16 @@ impl Context {
 							}
 						};
 
-						let (index, ty) = match binding_location {
-							BindingLocation::Ubo(index) => (index, gl::UNIFORM_BUFFER),
-							BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER),
+						let (index, ty, barrier_bit) = match binding_location {
+							BindingLocation::Ubo(index) => (index, gl::UNIFORM_BUFFER, gl::UNIFORM_BARRIER_BIT),
+							BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER, gl::SHADER_STORAGE_BARRIER_BIT),
 						};
 
-						match binding_location {
-							BindingLocation::Ubo(_) => {
-								barrier_tracker.insert_barrier(buffer, gl::UNIFORM_BARRIER_BIT);
-							}
+						barrier_tracker.insert_barrier(buffer, barrier_bit);
 
-							BindingLocation::Ssbo(_) => {
-								barrier_tracker.insert_barrier(buffer, gl::SHADER_STORAGE_BARRIER_BIT);
-
-								// TODO(pat.m): check for readonly flags
-								barrier_tracker.mark_buffer(buffer);
-							}
+						let block = pipeline.block_by_binding_location(binding_location).unwrap();
+						if block.is_read_write {
+							barrier_tracker.mark_buffer(buffer);
 						}
 
 						let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
@@ -244,22 +238,16 @@ impl Context {
 							}
 						};
 
-						let (index, ty) = match binding_location {
-							BindingLocation::Ubo(index) => (index, gl::UNIFORM_BUFFER),
-							BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER),
+						let (index, ty, barrier_bit) = match binding_location {
+							BindingLocation::Ubo(index) => (index, gl::UNIFORM_BUFFER, gl::UNIFORM_BARRIER_BIT),
+							BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER, gl::SHADER_STORAGE_BARRIER_BIT),
 						};
 
-						match binding_location {
-							BindingLocation::Ubo(_) => {
-								barrier_tracker.insert_barrier(buffer, gl::UNIFORM_BARRIER_BIT);
-							}
+						barrier_tracker.insert_barrier(buffer, barrier_bit);
 
-							BindingLocation::Ssbo(_) => {
-								barrier_tracker.insert_barrier(buffer, gl::SHADER_STORAGE_BARRIER_BIT);
-
-								// TODO(pat.m): check for readonly flags
-								barrier_tracker.mark_buffer(buffer);
-							}
+						let block = pipeline.block_by_binding_location(binding_location).unwrap();
+						if block.is_read_write {
+							barrier_tracker.mark_buffer(buffer);
 						}
 
 						let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
@@ -292,9 +280,9 @@ impl Context {
 		self.upload_heap.notify_finished();
 		frame_state.reset();
 
-		unsafe {
-			gl::PopDebugGroup();
-		}
+		// unsafe {
+		// 	gl::PopDebugGroup();
+		// }
 	}
 }
 
