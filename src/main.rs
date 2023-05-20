@@ -28,10 +28,15 @@ struct Game {
 
 	vert_shader: ShaderHandle,
 	vert_indexed_shader: ShaderHandle,
+	vert_sprite_shader: ShaderHandle,
 	frag_shader: ShaderHandle,
+	frag_textured_shader: ShaderHandle,
 
 	gen_args_compute_shader: ShaderHandle,
 	gen_color_compute_shader: ShaderHandle,
+
+	coolcat_image: ImageHandle,
+	texture_handle: u64,
 
 	time: f32,
 }
@@ -44,16 +49,34 @@ impl Game {
 		let vert_shader_def = ShaderDef::vertex("shaders/test.vert.glsl");
 		let vert_indexed_shader_def = ShaderDef::vertex("shaders/test_indexed.vert.glsl");
 		let frag_shader_def = ShaderDef::fragment("shaders/test.frag.glsl");
+		let frag_textured_shader_def = ShaderDef::fragment("shaders/textured.frag.glsl");
 
 		let gen_args_compute_shader_def = ShaderDef::compute("shaders/gen_args.cs.glsl");
 		let gen_color_compute_shader_def = ShaderDef::compute("shaders/gen_color.cs.glsl");
 
 		let vert_shader = context.resource_manager.load_shader(&vert_shader_def)?;
 		let vert_indexed_shader = context.resource_manager.load_shader(&vert_indexed_shader_def)?;
+		let vert_sprite_shader = context.resource_manager.load_shader(&ShaderDef::vertex("shaders/sprite.vert.glsl"))?;
+
 		let frag_shader = context.resource_manager.load_shader(&frag_shader_def)?;
+		let frag_textured_shader = context.resource_manager.load_shader(&frag_textured_shader_def)?;
 
 		let gen_args_compute_shader = context.resource_manager.load_shader(&gen_args_compute_shader_def)?;
 		let gen_color_compute_shader = context.resource_manager.load_shader(&gen_color_compute_shader_def)?;
+
+		let coolcat_image = context.resource_manager.load_image(&ImageDef::new("images/coolcat.png"))?;
+
+		let texture_handle;
+
+		{
+			let sampler_name = context.resource_manager.get_sampler(&SamplerDef::linear_clamped()).name;
+			let image_obj = context.resource_manager.resolve_image(coolcat_image).unwrap();
+
+			unsafe {
+				texture_handle = gl::GetTextureSamplerHandleARB(image_obj.name, sampler_name);
+				gl::MakeTextureHandleResidentARB(texture_handle);
+			}
+		}
 
 		unsafe {
 			gl::Enable(gl::DEPTH_TEST);
@@ -66,10 +89,16 @@ impl Game {
 
 			vert_shader,
 			vert_indexed_shader,
+			vert_sprite_shader,
+
 			frag_shader,
+			frag_textured_shader,
 
 			gen_args_compute_shader,
 			gen_color_compute_shader,
+
+			coolcat_image,
+			texture_handle,
 
 			time: 0.0
 		})
@@ -108,45 +137,63 @@ impl main_loop::MainLoop for Game {
 			.indirect(args_buffer)
 			.buffer("ColorBuffer", colour_buffer);
 
+		// {
+		// 	let vertex_buffer = [
+		// 		[-0.5, -0.5, 0.0, 1.0f32],
+		// 		[-0.5,  0.5, 0.0, 1.0],
+		// 		[ 0.0,  0.5, 0.0, 1.0],
+		// 		[ 0.0, -0.5, 0.0, 1.0],
+		// 	];
+
+
+		// 	self.frame_state.draw(self.vert_shader, self.frag_shader)
+		// 		.elements(6)
+		// 		.ubo(0, proj_view_buffer)
+		// 		.buffer("PerDrawUniforms", colour_buffer)
+		// 		.buffer("Positions", &vertex_buffer)
+		// 		.buffer(BindingLocation::Ssbo(1), quad_index_buffer);
+		// }
+
+		// {
+		// 	let vertex_buffer = [
+		// 		[-0.2, -0.2, 0.1, 1.0f32],
+		// 		[-0.2,  0.2, 0.1, 1.0],
+		// 		[ 0.2,  0.2, 0.1, 1.0],
+		// 		[ 0.2, -0.2, 0.1, 1.0],
+		// 	];
+
+		// 	let colour_data = [
+		// 		[1.0, 1.0, 0.5, 1.0f32],
+		// 		[1.0, 0.7, 1.0, 1.0f32],
+		// 	];
+
+		// 	self.frame_state.draw(self.vert_indexed_shader, self.frag_shader)
+		// 		.indexed(quad_index_buffer)
+		// 		.elements(6)
+		// 		.instances(2)
+		// 		.ubo(0, proj_view_buffer)
+		// 		.ssbo(0, &vertex_buffer)
+		// 		.ssbo(1, &colour_data);
+		// }
+
 		{
-			let vertex_buffer = [
-				[-0.5, -0.5, 0.0, 1.0f32],
-				[-0.5,  0.5, 0.0, 1.0],
-				[ 0.0,  0.5, 0.0, 1.0],
-				[ 0.0, -0.5, 0.0, 1.0],
-			];
+			#[derive(Copy, Clone)]
+			#[repr(C)]
+			struct SpriteData {
+				color: [f32; 4],
+				handle: u64,
+			}
 
+			let sprite_data = SpriteData {
+				color: [1.0, 1.0, 1.0, 1.0],
+				handle: self.texture_handle,
+			};
 
-			self.frame_state.draw(self.vert_shader, self.frag_shader)
+			self.frame_state.draw(self.vert_sprite_shader, self.frag_textured_shader)
 				.elements(6)
 				.ubo(0, proj_view_buffer)
-				.buffer("PerDrawUniforms", colour_buffer)
-				.buffer("Positions", &vertex_buffer)
-				.buffer(BindingLocation::Ssbo(1), quad_index_buffer);
+				.buffer("SpriteData", &sprite_data);
 		}
-
-		{
-			let vertex_buffer = [
-				[-0.2, -0.2, 0.1, 1.0f32],
-				[-0.2,  0.2, 0.1, 1.0],
-				[ 0.2,  0.2, 0.1, 1.0],
-				[ 0.2, -0.2, 0.1, 1.0],
-			];
-
-			let colour_data = [
-				[1.0, 1.0, 0.5, 1.0f32],
-				[1.0, 0.7, 1.0, 1.0f32],
-			];
-
-			self.frame_state.draw(self.vert_indexed_shader, self.frag_shader)
-				.indexed(quad_index_buffer)
-				.elements(6)
-				.instances(2)
-				.ubo(0, proj_view_buffer)
-				.ssbo(0, &vertex_buffer)
-				.ssbo(1, &colour_data);
-		}
-
 		self.context.end_frame(&mut self.frame_state);
 	}
 

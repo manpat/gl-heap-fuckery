@@ -13,3 +13,9 @@ infer element count for indexed draws
 ## goals
 - single global pipeline containing stages that can be rendered into
 - stages describe framebuffer layout and optionally default bindings
+
+
+
+
+
+## images

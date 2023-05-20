@@ -71,6 +71,7 @@ pub fn compile_shader(resource_manager: &mut ResourceManager, def: &ShaderDef) -
 		let src_cstring = std::ffi::CString::new(content.as_bytes())?;
 		let source_strings = [
 			b"#version 450\n\0".as_ptr()  as *const i8,
+			b"#extension GL_ARB_bindless_texture : require\n\0".as_ptr() as *const i8,
 			src_cstring.as_ptr(),
 		];
 

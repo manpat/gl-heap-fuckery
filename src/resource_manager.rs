@@ -8,13 +8,10 @@ use std::collections::HashMap;
 pub type ResourcePath = std::path::PathBuf;
 pub type ResourcePathRef = std::path::Path;
 
-pub use shader::{ShaderType, ShaderDef, BindingLocation};
-pub use pipeline::{PipelineDef, PipelineObject};
-pub use sampler::{SamplerDef, AddressingMode, FilterMode, SamplerObject};
+pub use self::shader::{ShaderType, ShaderDef, ShaderObject, BindingLocation};
+pub use self::pipeline::{PipelineDef, PipelineObject};
+pub use self::sampler::{SamplerDef, AddressingMode, FilterMode, SamplerObject};
 pub use self::image::{ImageDef, ImageObject};
-
-use shader::ShaderObject;
-
 
 
 
@@ -65,8 +62,12 @@ impl ResourceManager {
 		})
 	}
 
+	pub fn resolve_path(&self, path: &ResourcePathRef) -> ResourcePath {
+		self.resource_root_path.join(path)
+	}
+
 	pub fn load_text(&mut self, def: &ResourcePathRef) -> anyhow::Result<String> {
-		let string = std::fs::read_to_string(&self.resource_root_path.join(def))?;
+		let string = std::fs::read_to_string(&self.resolve_path(def))?;
 		Ok(string)
 	}
 
@@ -91,7 +92,7 @@ impl ResourceManager {
 			return Ok(*handle);
 		}
 
-		let object = self::image::load_raw(def)?;
+		let object = self::image::load_raw(self, def)?;
 
 		let handle = ImageHandle(self.image_counter);
 		self.image_counter += 1;

@@ -40,6 +40,8 @@ pub fn create_pipeline(resource_manager: &ResourceManager, def: &PipelineDef) ->
 		bind_shader_to_pipeline(resource_manager, pipeline_name, def.fragment, gl::FRAGMENT_SHADER_BIT, &mut composite_blocks);
 		bind_shader_to_pipeline(resource_manager, pipeline_name, def.compute, gl::COMPUTE_SHADER_BIT, &mut composite_blocks);
 
+		// TODO(pat.m): gl::ObjectLabel
+
 		gl::ValidateProgramPipeline(pipeline_name);
 	}
 

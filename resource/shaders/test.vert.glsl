@@ -5,7 +5,6 @@ out gl_PerVertex {
 out vec4 v_color;
 
 
-
 layout(std140, binding=0) uniform CameraUniforms {
     layout(row_major) mat4 u_projection_view;
 };
@@ -13,6 +12,7 @@ layout(std140, binding=0) uniform CameraUniforms {
 
 layout(std140, binding=1) uniform PerDrawUniforms {
     vec4 u_color;
+    sampler2D u_texture;
 };
 
 

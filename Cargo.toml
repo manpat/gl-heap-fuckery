@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 glam = "0.22"
-gl = "0.14"
 winit = "0.27"
 glutin = "0.30"
 glutin-winit = "0.2"
@@ -19,4 +18,7 @@ bumpalo = "3.12.1"
 [dependencies.image]
 version = "0.24"
 features = ["png"]
+
+[dependencies.gl]
+path = "./gl"
 
