@@ -4,6 +4,10 @@ use crate::resource_manager::{ShaderHandle, BindingLocation};
 use crate::upload_heap::{UploadHeap, BufferAllocation, UPLOAD_BUFFER_SIZE};
 
 
+pub const DEFAULT_BUFFER_ALIGNMENT: usize = 4;
+
+
+
 #[derive(Debug)]
 pub enum Command {
 	Draw(DrawCmd),
@@ -19,26 +23,16 @@ pub struct FrameState {
 
 	reserved_buffers: Vec<ReservedBuffer>,
 	streamed_buffers: Vec<StreamedBuffer>,
-
-	uniform_buffer_offset_alignment: usize,
 }
 
 impl FrameState {
 	pub fn new() -> Self {
-		let mut uniform_buffer_offset_alignment = 0;
-
-		unsafe {
-			gl::GetIntegerv(gl::UNIFORM_BUFFER_OFFSET_ALIGNMENT, &mut uniform_buffer_offset_alignment)
-		}
-
 		FrameState {
 			transient_data: bumpalo::Bump::with_capacity(UPLOAD_BUFFER_SIZE),
 			commands: Vec::new(),
 
 			reserved_buffers: Vec::new(),
 			streamed_buffers: Vec::new(),
-
-			uniform_buffer_offset_alignment: uniform_buffer_offset_alignment as usize,
 		}
 	}
 
@@ -63,8 +57,7 @@ impl FrameState {
 		self.streamed_buffers.push(StreamedBuffer::Pending {
 			data: data_copy.as_ptr().cast(),
 			size: data_copy.len() * std::mem::size_of::<T>(),
-
-			alignment_type: None,
+			alignment: DEFAULT_BUFFER_ALIGNMENT,
 		});
 
 		BufferHandle::Streamed(index)
@@ -73,7 +66,7 @@ impl FrameState {
 	pub fn reserve_buffer(&mut self, size: usize) -> BufferHandle
 	{
 		let index = self.reserved_buffers.len();
-		self.reserved_buffers.push(ReservedBuffer::Pending{size, alignment_type: None});
+		self.reserved_buffers.push(ReservedBuffer::Pending{size, alignment: DEFAULT_BUFFER_ALIGNMENT});
 		BufferHandle::Reserved(index)
 	}
 
@@ -110,25 +103,12 @@ impl FrameState {
 
 /////////////////// internal
 impl FrameState {
-	pub fn mark_ubo(&mut self, buffer_handle: BufferHandle) {
-		self.mark_alignment(buffer_handle, AlignmentType::Ubo);
-	}
-
-	pub fn mark_ssbo(&mut self, buffer_handle: BufferHandle) {
-		self.mark_alignment(buffer_handle, AlignmentType::Ssbo);
-	}
-
-	pub fn mark_index_buffer(&mut self, buffer_handle: BufferHandle) {
-		// TODO(pat.m): alignment?
-		self.mark_alignment(buffer_handle, AlignmentType::Other);
-	}
-
-	fn mark_alignment(&mut self, buffer_handle: BufferHandle, new_alignment_type: AlignmentType) {
+	pub fn imbue_buffer_alignment(&mut self, buffer_handle: BufferHandle, requested_alignment: usize) {
 		match buffer_handle {
 			BufferHandle::Streamed(index) => {
 				match &mut self.streamed_buffers[index] {
-					StreamedBuffer::Pending{alignment_type, ..} => {
-						alignment_type.get_or_insert(new_alignment_type);
+					StreamedBuffer::Pending{alignment, ..} => {
+						*alignment = (*alignment).max(requested_alignment);
 					}
 
 					_ => {}
@@ -137,8 +117,8 @@ impl FrameState {
 
 			BufferHandle::Reserved(index) => {
 				match &mut self.reserved_buffers[index] {
-					ReservedBuffer::Pending{alignment_type, ..} => {
-						alignment_type.get_or_insert(new_alignment_type);
+					ReservedBuffer::Pending{alignment, ..} => {
+						*alignment = (*alignment).max(requested_alignment);
 					}
 
 					_ => {}
@@ -150,33 +130,24 @@ impl FrameState {
 	}
 
 	pub fn upload_buffers(&mut self, upload_heap: &mut UploadHeap) {
-		self.upload_buffer_of_type(upload_heap, AlignmentType::Ubo, self.uniform_buffer_offset_alignment);
-		self.upload_buffer_of_type(upload_heap, AlignmentType::Ssbo, 32);
-		self.upload_buffer_of_type(upload_heap, AlignmentType::Other, 4);
-	}
+		// TODO(pat.m): these could be sorted for better heap usage.
+		// alternatively use gap filling?
 
-	fn upload_buffer_of_type(&mut self, upload_heap: &mut UploadHeap, requested_alignment_type: AlignmentType, alignment: usize) {
-		// TODO(pat.m): this should maybe be handled separately - come back to this once tracked resource graphs are a thing,
-		// since space could be reused
 		for buffer in self.reserved_buffers.iter_mut() {
-			let ReservedBuffer::Pending{size, alignment_type: Some(alignment_type)} = *buffer else {
+			let ReservedBuffer::Pending{size, alignment} = *buffer else {
 				continue
 			};
 
-			if alignment_type == requested_alignment_type {
-				*buffer = ReservedBuffer::Allocated(upload_heap.reserve_space(size, alignment));
-			}
+			*buffer = ReservedBuffer::Allocated(upload_heap.reserve_space(size, alignment));
 		}
 
 		for buffer in self.streamed_buffers.iter_mut() {
-			let StreamedBuffer::Pending{data, size, alignment_type: Some(alignment_type)} = *buffer else {
+			let StreamedBuffer::Pending{data, size, alignment} = *buffer else {
 				continue
 			};
 
-			if alignment_type == requested_alignment_type {
-				let slice = unsafe{std::slice::from_raw_parts(data, size)};
-				*buffer = StreamedBuffer::Uploaded(upload_heap.push_data(slice, alignment));
-			}
+			let slice = unsafe{std::slice::from_raw_parts(data, size)};
+			*buffer = StreamedBuffer::Uploaded(upload_heap.push_data(slice, alignment));
 		}
 	}
 
@@ -237,21 +208,13 @@ impl<'t, T> IntoBufferHandle for &'t T
 }
 
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum AlignmentType {
-	Ubo,
-	Ssbo,
-	Other,
-}
-
 
 #[derive(Debug)]
 enum StreamedBuffer {
 	Pending {
 		data: *const u8,
 		size: usize,
-
-		alignment_type: Option<AlignmentType>,
+		alignment: usize,
 	},
 
 	Uploaded(BufferAllocation),
@@ -262,8 +225,7 @@ enum StreamedBuffer {
 enum ReservedBuffer {
 	Pending {
 		size: usize,
-
-		alignment_type: Option<AlignmentType>,
+		alignment: usize,
 	},
 
 	Allocated(BufferAllocation),

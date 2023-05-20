@@ -3,12 +3,17 @@ use crate::commands::{Command, FrameState, BufferHandle};
 use crate::upload_heap::UploadHeap;
 
 
+pub const SSBO_ALIGNMENT: usize = 32;
+
+
 #[derive(Debug)]
 pub struct Context {
 	pub resource_manager: ResourceManager,
 	pub upload_heap: UploadHeap,
 
 	vao_name: u32,
+
+	uniform_buffer_offset_alignment: usize,
 }
 
 impl Context {
@@ -23,11 +28,20 @@ impl Context {
 			gl::BindVertexArray(vao_name);
 		}
 
+		let mut uniform_buffer_offset_alignment = 0;
+
+		unsafe {
+			gl::GetIntegerv(gl::UNIFORM_BUFFER_OFFSET_ALIGNMENT, &mut uniform_buffer_offset_alignment)
+		}
+
+
 		Ok(Self{
 			resource_manager,
 			upload_heap,
 
 			vao_name,
+
+			uniform_buffer_offset_alignment: uniform_buffer_offset_alignment as usize,
 		})
 	}
 
@@ -44,81 +58,53 @@ impl Context {
 
 		// Resolve named buffer block bindings
 		for cmd in commands.iter_mut() {
-			match cmd {
+			let (block_bindings, pipeline_def) = match cmd {
 				Command::Draw(cmd) => {
-					for (binding, _) in cmd.block_bindings.iter_mut() {
-						if let BlockBinding::Named(name) = binding {
-							let pipeline_def = PipelineDef {
-								vertex: Some(cmd.vertex_shader),
-								fragment: cmd.fragment_shader,
-								compute: None,
-							};
+					let pipeline_def = PipelineDef {
+						vertex: Some(cmd.vertex_shader),
+						fragment: cmd.fragment_shader,
+						.. PipelineDef::default()
+					};
 
-							let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
-							let block = pipeline.block_by_name(*name).unwrap();
-
-							*binding = BlockBinding::Explicit(block.binding_location);
-						}
-					}
-				}
+					(&mut cmd.block_bindings, pipeline_def)
+				},
 
 				Command::Dispatch(cmd) => {
-					for (binding, _) in cmd.block_bindings.iter_mut() {
-						if let BlockBinding::Named(name) = binding {
-							let pipeline_def = PipelineDef {
-								vertex: None,
-								fragment: None,
-								compute: Some(cmd.compute_shader),
-							};
+					let pipeline_def = PipelineDef {
+						compute: Some(cmd.compute_shader),
+						.. PipelineDef::default()
+					};
 
-							let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
-							let block = pipeline.block_by_name(*name).unwrap();
+					(&mut cmd.block_bindings, pipeline_def)
+				},
+			};
 
-							*binding = BlockBinding::Explicit(block.binding_location);
-						}
-					}
+			let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
+
+			for (binding, _) in block_bindings.iter_mut() {
+				if let BlockBinding::Named(name) = binding {
+					let block = pipeline.block_by_name(*name).unwrap();
+					*binding = BlockBinding::Explicit(block.binding_location);
 				}
 			}
 		}
 
 		// Upload UBOs first since they have the greatest alignment requirements
 		for cmd in commands.iter() {
-			match cmd {
-				Command::Draw(cmd) => {
-					for (binding, buffer) in cmd.block_bindings.iter() {
-						if let BlockBinding::Explicit(BindingLocation::Ubo(_)) = binding {
-							frame_state.mark_ubo(*buffer);
-						}
-					}
-				}
+			let block_bindings = match cmd {
+				Command::Draw(cmd) => &cmd.block_bindings,
+				Command::Dispatch(cmd) => &cmd.block_bindings,
+			};
 
-				Command::Dispatch(cmd) => {
-					for (binding, buffer) in cmd.block_bindings.iter() {
-						if let BlockBinding::Explicit(BindingLocation::Ubo(_)) = binding {
-							frame_state.mark_ubo(*buffer);
-						}
-					}
-				}
-			}
-		}
+			for (binding, buffer) in block_bindings.iter() {
+				let BlockBinding::Explicit(location) = binding else { continue };
 
-		for cmd in commands.iter() {
-			match cmd {
-				Command::Draw(cmd) => {
-					for (binding, buffer) in cmd.block_bindings.iter() {
-						if let BlockBinding::Explicit(BindingLocation::Ssbo(_)) = binding {
-							frame_state.mark_ssbo(*buffer);
-						}
-					}
-				}
+				let requested_alignment = match location {
+					BindingLocation::Ubo(_) => self.uniform_buffer_offset_alignment,
+					BindingLocation::Ssbo(_) => SSBO_ALIGNMENT,
+				};
 
-				Command::Dispatch(cmd) => {
-					for (binding, buffer) in cmd.block_bindings.iter() {
-						if let BlockBinding::Explicit(BindingLocation::Ssbo(_)) = binding {
-							frame_state.mark_ssbo(*buffer);
-						}
-					}
-				}
+				frame_state.imbue_buffer_alignment(*buffer, requested_alignment);
 			}
 		}
 
@@ -126,13 +112,13 @@ impl Context {
 			match cmd {
 				Command::Draw(cmd) => {
 					if let Some(buffer) = cmd.index_buffer {
-						frame_state.mark_index_buffer(buffer);
+						frame_state.imbue_buffer_alignment(buffer, 4);
 					}
 				}
 
 				Command::Dispatch(cmd) => {
 					if let DispatchSizeSource::Indirect(buffer) = cmd.num_groups {
-						frame_state.mark_index_buffer(buffer);
+						frame_state.imbue_buffer_alignment(buffer, 4);
 					}
 				}
 			}

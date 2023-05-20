@@ -24,9 +24,6 @@ pub struct ShaderHandle(pub u32);
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct ImageHandle(pub u32);
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct PipelineHandle(pub u32);
-
 
 
 #[derive(Debug)]
@@ -105,7 +102,6 @@ impl ResourceManager {
 		Ok(handle)
 	}
 
-	// TODO(pat.m): maybe I want to do away with fixed pipelines and just bind PipelineDefs instead
 	pub fn get_pipeline<'s>(&'s mut self, def: &'_ PipelineDef) -> anyhow::Result<&'s PipelineObject> {
 		// HACK: I can't figure out the lifetimes for this - something goes weird if I try to use if let = get here
 		// see: https://users.rust-lang.org/t/lifetime-is-not-dropped-after-if-let-x-return-x/42892

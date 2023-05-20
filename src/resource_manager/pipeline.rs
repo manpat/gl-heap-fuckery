@@ -2,7 +2,7 @@ use super::{ResourceManager, ShaderHandle, shader::BlockDescription};
 use std::collections::HashMap;
 
 
-#[derive(Hash, Clone, Debug, Eq, PartialEq)]
+#[derive(Hash, Clone, Default, Debug, Eq, PartialEq)]
 pub struct PipelineDef {
 	pub vertex: Option<ShaderHandle>,
 	pub fragment: Option<ShaderHandle>,
