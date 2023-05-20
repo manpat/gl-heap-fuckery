@@ -136,51 +136,66 @@ impl Context {
 		let mut barrier_tracker = ResourceBarrierTracker::new();
 
 		for cmd in commands {
+			use crate::upload_heap::BufferAllocation;
+
+			// Lookup and bind pipeline
+			let pipeline_def = match &cmd {
+				Command::Draw(cmd) => PipelineDef {
+					vertex: Some(cmd.vertex_shader),
+					fragment: cmd.fragment_shader,
+					.. PipelineDef::default()
+				},
+
+				Command::Dispatch(cmd) => PipelineDef {
+					compute: Some(cmd.compute_shader),
+					.. PipelineDef::default()
+				},
+			};
+
+			let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
+
+			unsafe {
+				gl::BindProgramPipeline(pipeline.name);
+			}
+
+
+			// Bind buffers
+			let block_bindings = match &cmd {
+				Command::Draw(cmd) => &cmd.block_bindings,
+				Command::Dispatch(cmd) => &cmd.block_bindings,
+			};
+
+			for &(block_binding, buffer) in block_bindings {
+				let binding_location = match block_binding {
+					BlockBinding::Explicit(location) => location,
+					BlockBinding::Named(name) => {
+						panic!("Unresolved named binding '{name}'");
+					}
+				};
+
+				let (index, ty, barrier_bit) = match binding_location {
+					BindingLocation::Ubo(index) => (index, gl::UNIFORM_BUFFER, gl::UNIFORM_BARRIER_BIT),
+					BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER, gl::SHADER_STORAGE_BARRIER_BIT),
+				};
+
+				barrier_tracker.insert_barrier(buffer, barrier_bit);
+
+				let block = pipeline.block_by_binding_location(binding_location).unwrap();
+				if block.is_read_write {
+					barrier_tracker.mark_buffer(buffer);
+				}
+
+				let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
+
+				unsafe {
+					gl::BindBufferRange(ty, index, upload_buffer_name, offset as isize, size as isize);
+				}
+			}
+
+
+			// Bind command specific state and execute
 			match cmd {
 				Command::Draw(cmd) => {
-					use crate::upload_heap::BufferAllocation;
-
-					let pipeline_def = PipelineDef {
-						vertex: Some(cmd.vertex_shader),
-						fragment: cmd.fragment_shader,
-						compute: None,
-					};
-
-					// Maybe this should be a LRU pool of pipelines instead of a created resource
-					let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
-
-					unsafe {
-						gl::BindProgramPipeline(pipeline.name);
-					}
-
-
-					for &(block_binding, buffer) in cmd.block_bindings.iter() {
-						let binding_location = match block_binding {
-							BlockBinding::Explicit(location) => location,
-							BlockBinding::Named(name) => {
-								panic!("Unresolved named binding '{name}'");
-							}
-						};
-
-						let (index, ty, barrier_bit) = match binding_location {
-							BindingLocation::Ubo(index) => (index, gl::UNIFORM_BUFFER, gl::UNIFORM_BARRIER_BIT),
-							BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER, gl::SHADER_STORAGE_BARRIER_BIT),
-						};
-
-						barrier_tracker.insert_barrier(buffer, barrier_bit);
-
-						let block = pipeline.block_by_binding_location(binding_location).unwrap();
-						if block.is_read_write {
-							barrier_tracker.mark_buffer(buffer);
-						}
-
-						let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
-
-						unsafe {
-							gl::BindBufferRange(ty, index, upload_buffer_name, offset as isize, size as isize);
-						}
-					}
-
 					if let Some(buffer) = cmd.index_buffer {
 						let BufferAllocation{offset, ..} = frame_state.resolve_buffer_allocation(buffer);
 						let offset_ptr = offset as *const _;
@@ -200,49 +215,6 @@ impl Context {
 				}
 
 				Command::Dispatch(cmd) => {
-					use crate::upload_heap::BufferAllocation;
-
-					let pipeline_def = PipelineDef {
-						vertex: None,
-						fragment: None,
-						compute: Some(cmd.compute_shader),
-					};
-
-					// Maybe this should be a LRU pool of pipelines instead of a created resource
-					let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
-
-					unsafe {
-						gl::BindProgramPipeline(pipeline.name);
-					}
-
-
-					for &(block_binding, buffer) in cmd.block_bindings.iter() {
-						let binding_location = match block_binding {
-							BlockBinding::Explicit(location) => location,
-							BlockBinding::Named(name) => {
-								panic!("Unresolved named binding '{name}'");
-							}
-						};
-
-						let (index, ty, barrier_bit) = match binding_location {
-							BindingLocation::Ubo(index) => (index, gl::UNIFORM_BUFFER, gl::UNIFORM_BARRIER_BIT),
-							BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER, gl::SHADER_STORAGE_BARRIER_BIT),
-						};
-
-						barrier_tracker.insert_barrier(buffer, barrier_bit);
-
-						let block = pipeline.block_by_binding_location(binding_location).unwrap();
-						if block.is_read_write {
-							barrier_tracker.mark_buffer(buffer);
-						}
-
-						let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
-
-						unsafe {
-							gl::BindBufferRange(ty, index, upload_buffer_name, offset as isize, size as isize);
-						}
-					}
-
 					match cmd.num_groups {
 						DispatchSizeSource::Indirect(buffer) => {
 							let BufferAllocation{offset, ..} = frame_state.resolve_buffer_allocation(buffer);
