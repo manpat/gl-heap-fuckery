@@ -1,8 +1,13 @@
+mod draw_cmd;
+mod dispatch_cmd;
+
 use std::mem::ManuallyDrop;
 
 use crate::resource_manager::{ShaderHandle, BindingLocation};
 use crate::upload_heap::{UploadHeap, BufferAllocation, UPLOAD_BUFFER_SIZE};
 
+pub use draw_cmd::*;
+pub use dispatch_cmd::*;
 
 pub const DEFAULT_BUFFER_ALIGNMENT: usize = 4;
 
@@ -63,6 +68,8 @@ impl FrameState {
 		BufferHandle::Streamed(index)
 	}
 
+	// TODO(pat.m): maybe reserved buffers shouldn't use the upload heap?
+	// upload heap is mapped, host visible, and that might not be ideal for GPU-only visible stuff
 	pub fn reserve_buffer(&mut self, size: usize) -> BufferHandle
 	{
 		let index = self.reserved_buffers.len();
@@ -71,32 +78,11 @@ impl FrameState {
 	}
 
 	pub fn draw(&mut self, vertex_shader: ShaderHandle, fragment_shader: ShaderHandle) -> DrawCmdBuilder<'_> {
-		DrawCmdBuilder {
-			frame_state: self,
-			cmd: ManuallyDrop::new(DrawCmd {
-				vertex_shader,
-				fragment_shader: Some(fragment_shader),
-
-				primitive_type: PrimitiveType::Triangles,
-
-				num_elements: 3,
-				num_instances: 1,
-
-				index_buffer: None,
-				block_bindings: Vec::new(),
-			})
-		}
+		DrawCmdBuilder::new(self, vertex_shader, fragment_shader)
 	}
 
 	pub fn dispatch(&mut self, compute_shader: ShaderHandle) -> DispatchCmdBuilder<'_> {
-		DispatchCmdBuilder {
-			frame_state: self,
-			cmd: ManuallyDrop::new(DispatchCmd {
-				compute_shader,
-				num_groups: DispatchSizeSource::Explicit([1; 3]),
-				block_bindings: Vec::new(),
-			})
-		}
+		DispatchCmdBuilder::new(self, compute_shader)
 	}
 }
 
@@ -250,152 +236,3 @@ impl From<&'static str> for BlockBinding {
 	}
 }
 
-
-#[derive(Debug, Copy, Clone)]
-#[repr(u32)]
-pub enum PrimitiveType {
-	Points = gl::POINTS,
-	Lines = gl::LINES,
-	Triangles = gl::TRIANGLES,
-}
-
-
-#[derive(Debug)]
-pub struct DrawCmd {
-	pub vertex_shader: ShaderHandle,
-	pub fragment_shader: Option<ShaderHandle>,
-
-	pub primitive_type: PrimitiveType,
-
-	pub num_elements: u32,
-	pub num_instances: u32,
-
-	// If set, use indexed rendering
-	// TODO(pat.m): how to determine element type
-	pub index_buffer: Option<BufferHandle>,
-
-	pub block_bindings: Vec<(BlockBinding, BufferHandle)>,
-}
-
-
-impl From<DrawCmd> for Command {
-	fn from(cmd: DrawCmd) -> Command {
-		Command::Draw(cmd)
-	}
-}
-
-pub struct DrawCmdBuilder<'fs> {
-	frame_state: &'fs mut FrameState,
-	cmd: ManuallyDrop<DrawCmd>,
-}
-
-impl<'fs> Drop for DrawCmdBuilder<'fs> {
-	fn drop(&mut self) {
-		let cmd = unsafe { ManuallyDrop::take(&mut self.cmd) };
-		self.frame_state.push_cmd(cmd);
-	}
-}
-
-impl<'fs> DrawCmdBuilder<'fs> {
-	pub fn elements(&mut self, num_elements: u32) -> &mut Self {
-		self.cmd.num_elements = num_elements;
-		self
-	}
-
-	pub fn instances(&mut self, num_instances: u32) -> &mut Self {
-		self.cmd.num_instances = num_instances;
-		self
-	}
-
-	pub fn primitive(&mut self, ty: PrimitiveType) -> &mut Self {
-		self.cmd.primitive_type = ty;
-		self
-	}
-
-	pub fn indexed(&mut self, buffer: impl IntoBufferHandle) -> &mut Self {
-		let buffer_handle = buffer.into_buffer_handle(self.frame_state);
-		self.cmd.index_buffer = Some(buffer_handle);
-		self
-	}
-
-	pub fn buffer(&mut self, binding: impl Into<BlockBinding>, buffer: impl IntoBufferHandle) -> &mut Self {
-		let buffer_handle = buffer.into_buffer_handle(self.frame_state);
-		let binding = binding.into();
-		self.cmd.block_bindings.push((binding, buffer_handle));
-		self
-	}
-
-	pub fn ubo(&mut self, index: u32, buffer: impl IntoBufferHandle) -> &mut Self {
-		self.buffer(BindingLocation::Ubo(index), buffer)
-	}
-
-	pub fn ssbo(&mut self, index: u32, buffer: impl IntoBufferHandle) -> &mut Self {
-		self.buffer(BindingLocation::Ssbo(index), buffer)
-	}
-}
-
-
-
-
-#[derive(Debug)]
-pub enum DispatchSizeSource {
-	Explicit([u32; 3]),
-	Indirect(BufferHandle),
-}
-
-
-#[derive(Debug)]
-pub struct DispatchCmd {
-	pub compute_shader: ShaderHandle,
-
-	pub num_groups: DispatchSizeSource,
-
-	pub block_bindings: Vec<(BlockBinding, BufferHandle)>,
-}
-
-
-impl From<DispatchCmd> for Command {
-	fn from(cmd: DispatchCmd) -> Command {
-		Command::Dispatch(cmd)
-	}
-}
-
-pub struct DispatchCmdBuilder<'fs> {
-	frame_state: &'fs mut FrameState,
-	cmd: ManuallyDrop<DispatchCmd>,
-}
-
-impl<'fs> Drop for DispatchCmdBuilder<'fs> {
-	fn drop(&mut self) {
-		let cmd = unsafe { ManuallyDrop::take(&mut self.cmd) };
-		self.frame_state.push_cmd(cmd);
-	}
-}
-
-impl<'fs> DispatchCmdBuilder<'fs> {
-	pub fn indirect(&mut self, buffer: impl IntoBufferHandle) -> &mut Self {
-		let buffer_handle = buffer.into_buffer_handle(self.frame_state);
-		self.cmd.num_groups = DispatchSizeSource::Indirect(buffer_handle);
-		self
-	}
-
-	pub fn groups(&mut self, x: u32, y: u32, z: u32) -> &mut Self {
-		self.cmd.num_groups = DispatchSizeSource::Explicit([x, y, z]);
-		self
-	}
-
-	pub fn buffer(&mut self, binding: impl Into<BlockBinding>, buffer: impl IntoBufferHandle) -> &mut Self {
-		let buffer_handle = buffer.into_buffer_handle(self.frame_state);
-		let binding = binding.into();
-		self.cmd.block_bindings.push((binding, buffer_handle));
-		self
-	}
-
-	pub fn ubo(&mut self, index: u32, buffer: impl IntoBufferHandle) -> &mut Self {
-		self.buffer(BindingLocation::Ubo(index), buffer)
-	}
-
-	pub fn ssbo(&mut self, index: u32, buffer: impl IntoBufferHandle) -> &mut Self {
-		self.buffer(BindingLocation::Ssbo(index), buffer)
-	}
-}

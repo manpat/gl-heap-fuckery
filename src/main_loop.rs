@@ -22,7 +22,7 @@ use common::math::Vec2i;
 
 pub trait MainLoop {
 	fn present(&mut self);
-	fn resize(&mut self, new_size: Vec2i) {}
+	fn resize(&mut self, _new_size: Vec2i) {}
 }
 
 pub fn run<F, M>(start_main_loop: F) -> anyhow::Result<()>

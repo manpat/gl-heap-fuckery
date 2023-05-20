@@ -1,5 +1,5 @@
 use crate::resource_manager::*;
-use crate::commands::{Command, FrameState, BufferHandle};
+use crate::commands::{self, Command, FrameState, BufferHandle};
 use crate::upload_heap::UploadHeap;
 
 
@@ -89,7 +89,7 @@ impl Context {
 			}
 		}
 
-		// Upload UBOs first since they have the greatest alignment requirements
+		// Determine required alignment for bound buffer
 		for cmd in commands.iter() {
 			let block_bindings = match cmd {
 				Command::Draw(cmd) => &cmd.block_bindings,
@@ -106,23 +106,18 @@ impl Context {
 
 				frame_state.imbue_buffer_alignment(*buffer, requested_alignment);
 			}
-		}
 
-		for cmd in commands.iter() {
 			match cmd {
-				Command::Draw(cmd) => {
-					if let Some(buffer) = cmd.index_buffer {
-						frame_state.imbue_buffer_alignment(buffer, 4);
-					}
+				Command::Draw(commands::DrawCmd{ index_buffer: Some(buffer), .. }) 
+					| Command::Dispatch(commands::DispatchCmd{ num_groups: DispatchSizeSource::Indirect(buffer), .. }) =>
+				{
+					frame_state.imbue_buffer_alignment(*buffer, 4);
 				}
 
-				Command::Dispatch(cmd) => {
-					if let DispatchSizeSource::Indirect(buffer) = cmd.num_groups {
-						frame_state.imbue_buffer_alignment(buffer, 4);
-					}
-				}
+				_ => {}
 			}
 		}
+
 
 		// unsafe {
 		// 	let msg = "Frame Evaluate";
