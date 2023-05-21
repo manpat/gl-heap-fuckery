@@ -4,7 +4,11 @@ layout(std430, binding=0) buffer ArgsBuffer {
 	uvec3 s_groups;
 };
 
+layout(std430, binding=1) buffer ColorBuffer {
+	vec4 s_color;
+};
 
 void main() {
-	s_groups = uvec3(1, 1, 1);
+	s_groups = uvec3(10, 10, 1);
+	s_color = vec4(1.0, 0.0, 1.0, 1.0);
 }

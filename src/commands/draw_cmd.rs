@@ -1,5 +1,5 @@
-use super::{BufferHandle, IntoBufferHandle, BlockBinding, Command, FrameState};
-use crate::resource_manager::{ShaderHandle, BindingLocation};
+use super::{BufferHandle, IntoBufferHandle, BlockBinding, Command, FrameState, ImageBinding, ImageBindingLocation};
+use crate::resource_manager::{ShaderHandle, BindingLocation, ImageHandle, SamplerDef};
 
 use std::mem::ManuallyDrop;
 
@@ -28,6 +28,7 @@ pub struct DrawCmd {
 	pub index_buffer: Option<BufferHandle>,
 
 	pub block_bindings: Vec<(BlockBinding, BufferHandle)>,
+	pub image_bindings: Vec<ImageBinding>,
 }
 
 
@@ -78,6 +79,21 @@ impl<'fs> DrawCmdBuilder<'fs> {
 	pub fn ssbo(&mut self, index: u32, buffer: impl IntoBufferHandle) -> &mut Self {
 		self.buffer(BindingLocation::Ssbo(index), buffer)
 	}
+
+	pub fn texture(&mut self, location: impl Into<ImageBindingLocation>, image: ImageHandle, sampler: SamplerDef) -> &mut Self {
+		self.cmd.image_bindings.push(ImageBinding::texture(image, sampler, location));
+		self
+	}
+
+	pub fn image(&mut self, location: impl Into<ImageBindingLocation>, image: ImageHandle) -> &mut Self {
+		self.cmd.image_bindings.push(ImageBinding::image(image, location));
+		self
+	}
+
+	pub fn image_rw(&mut self, location: impl Into<ImageBindingLocation>, image: ImageHandle) -> &mut Self {
+		self.cmd.image_bindings.push(ImageBinding::image_rw(image, location));
+		self
+	}
 }
 
 impl<'fs> DrawCmdBuilder<'fs> {
@@ -95,6 +111,7 @@ impl<'fs> DrawCmdBuilder<'fs> {
 
 				index_buffer: None,
 				block_bindings: Vec::new(),
+				image_bindings: Vec::new(),
 			})
 		}
 	}

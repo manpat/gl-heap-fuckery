@@ -12,7 +12,6 @@ layout(std140, binding=0) uniform CameraUniforms {
 
 layout(std140, binding=1) uniform PerDrawUniforms {
     vec4 u_color;
-    sampler2D u_texture;
 };
 
 

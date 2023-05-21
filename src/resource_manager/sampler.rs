@@ -15,7 +15,7 @@ pub enum FilterMode {
 	Linear = gl::LINEAR,
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct SamplerDef {
 	pub addressing_mode: AddressingMode,
 	pub minify_filter: FilterMode,
@@ -50,6 +50,9 @@ pub struct SamplerObject {
 pub fn create_sampler(def: &SamplerDef) -> SamplerObject {
 	let mut sampler_name = 0;
 
+	let debug_label = format!("min: {:?}, mag: {:?}, address: {:?}",
+		def.minify_filter, def.magnify_filter, def.addressing_mode);
+
 	unsafe {
 		gl::CreateSamplers(1, &mut sampler_name);
 		gl::SamplerParameteri(sampler_name, gl::TEXTURE_MIN_FILTER, def.minify_filter as i32);
@@ -58,6 +61,8 @@ pub fn create_sampler(def: &SamplerDef) -> SamplerObject {
 		gl::SamplerParameteri(sampler_name, gl::TEXTURE_WRAP_S, def.addressing_mode as i32);
 		gl::SamplerParameteri(sampler_name, gl::TEXTURE_WRAP_T, def.addressing_mode as i32);
 		gl::SamplerParameteri(sampler_name, gl::TEXTURE_WRAP_R, def.addressing_mode as i32);
+
+		gl::ObjectLabel(gl::SAMPLER, sampler_name, debug_label.len() as i32, debug_label.as_ptr() as *const _);
 	}
 
 	SamplerObject {

@@ -1,9 +1,7 @@
 mod draw_cmd;
 mod dispatch_cmd;
 
-use std::mem::ManuallyDrop;
-
-use crate::resource_manager::{ShaderHandle, BindingLocation};
+use crate::resource_manager::{ShaderHandle, BindingLocation, ImageHandle, SamplerDef, PipelineDef};
 use crate::upload_heap::{UploadHeap, BufferAllocation, UPLOAD_BUFFER_SIZE};
 
 pub use draw_cmd::*;
@@ -17,6 +15,55 @@ pub const DEFAULT_BUFFER_ALIGNMENT: usize = 4;
 pub enum Command {
 	Draw(DrawCmd),
 	Dispatch(DispatchCmd),
+}
+
+impl Command {
+	pub fn block_bindings(&self) -> Option<&[(BlockBinding, BufferHandle)]> {
+		match self {
+			Command::Draw(DrawCmd { block_bindings, .. })
+			| Command::Dispatch(DispatchCmd { block_bindings, .. })
+				=> Some(block_bindings),
+		}
+	}
+
+	pub fn block_bindings_mut(&mut self) -> Option<&mut [(BlockBinding, BufferHandle)]> {
+		match self {
+			Command::Draw(DrawCmd { block_bindings, .. })
+			| Command::Dispatch(DispatchCmd { block_bindings, .. })
+				=> Some(block_bindings),
+		}
+	}
+
+	pub fn image_bindings(&self) -> Option<&[ImageBinding]> {
+		match self {
+			Command::Draw(DrawCmd { image_bindings, .. })
+			| Command::Dispatch(DispatchCmd { image_bindings, .. })
+				=> Some(image_bindings),
+		}
+	}
+
+	pub fn image_bindings_mut(&mut self) -> Option<&mut [ImageBinding]> {
+		match self {
+			Command::Draw(DrawCmd { image_bindings, .. })
+			| Command::Dispatch(DispatchCmd { image_bindings, .. })
+				=> Some(image_bindings),
+		}
+	}
+
+	pub fn pipeline_def(&self) -> Option<PipelineDef> {
+		match self {
+			Command::Draw(cmd) => Some(PipelineDef {
+				vertex: Some(cmd.vertex_shader),
+				fragment: cmd.fragment_shader,
+				.. PipelineDef::default()
+			}),
+
+			Command::Dispatch(cmd) => Some(PipelineDef {
+				compute: Some(cmd.compute_shader),
+				.. PipelineDef::default()
+			}),
+		}
+	}
 }
 
 
@@ -236,3 +283,80 @@ impl From<&'static str> for BlockBinding {
 	}
 }
 
+
+
+#[derive(Debug, Copy, Clone)]
+pub enum ImageBindingLocation {
+	Explicit(u32),
+	Named(&'static str),
+}
+
+impl From<u32> for ImageBindingLocation {
+	fn from(o: u32) -> ImageBindingLocation {
+		ImageBindingLocation::Explicit(o)
+	}
+}
+
+impl From<&'static str> for ImageBindingLocation {
+	fn from(o: &'static str) -> ImageBindingLocation {
+		ImageBindingLocation::Named(o)
+	}
+}
+
+
+#[derive(Debug, Copy, Clone)]
+pub enum ImageBinding {
+	Texture {
+		handle: ImageHandle,
+		sampler: SamplerDef,
+		location: ImageBindingLocation,
+	},
+
+	Image {
+		handle: ImageHandle,
+		location: ImageBindingLocation,
+		read_write: bool,
+	}
+}
+
+
+impl ImageBinding {
+	pub fn texture(handle: ImageHandle, sampler: SamplerDef, location: impl Into<ImageBindingLocation>) -> Self {
+		ImageBinding::Texture {
+			handle,
+			sampler,
+			location: location.into(),
+		}
+	}
+
+	pub fn image(handle: ImageHandle, location: impl Into<ImageBindingLocation>) -> Self {
+		ImageBinding::Image {
+			handle,
+			location: location.into(),
+			read_write: false,
+		}
+	}
+
+	pub fn image_rw(handle: ImageHandle, location: impl Into<ImageBindingLocation>) -> Self {
+		ImageBinding::Image {
+			handle,
+			location: location.into(),
+			read_write: true,
+		}
+	}
+
+	pub fn image_handle(&self) -> ImageHandle {
+		let (ImageBinding::Texture{handle, ..} | ImageBinding::Image{handle, ..}) = self;
+		*handle
+	}
+
+	pub fn location(&self) -> ImageBindingLocation {
+		let (ImageBinding::Texture{location, ..} | ImageBinding::Image{location, ..}) = self;
+		*location
+	}
+
+	pub fn set_location(&mut self, new_location: ImageBindingLocation) {
+		let (ImageBinding::Texture{location, ..} | ImageBinding::Image{location, ..}) = self;
+		*location = new_location;
+	}
+}

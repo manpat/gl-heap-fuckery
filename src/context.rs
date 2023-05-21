@@ -50,7 +50,7 @@ impl Context {
 	}
 
 	pub fn end_frame(&mut self, frame_state: &mut FrameState) {
-		use crate::commands::{BlockBinding, DispatchSizeSource};
+		use crate::commands::{BlockBinding, DispatchSizeSource, ImageBindingLocation};
 
 		// TODO(pat.m): non-ubo data could be interleaved with ubo data to save space
 
@@ -58,53 +58,41 @@ impl Context {
 
 		// Resolve named buffer block bindings
 		for cmd in commands.iter_mut() {
-			let (block_bindings, pipeline_def) = match cmd {
-				Command::Draw(cmd) => {
-					let pipeline_def = PipelineDef {
-						vertex: Some(cmd.vertex_shader),
-						fragment: cmd.fragment_shader,
-						.. PipelineDef::default()
-					};
-
-					(&mut cmd.block_bindings, pipeline_def)
-				},
-
-				Command::Dispatch(cmd) => {
-					let pipeline_def = PipelineDef {
-						compute: Some(cmd.compute_shader),
-						.. PipelineDef::default()
-					};
-
-					(&mut cmd.block_bindings, pipeline_def)
-				},
-			};
-
+			let Some(pipeline_def) = cmd.pipeline_def() else { continue };
 			let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
 
-			for (binding, _) in block_bindings.iter_mut() {
-				if let BlockBinding::Named(name) = binding {
-					let block = pipeline.block_by_name(*name).unwrap();
-					*binding = BlockBinding::Explicit(block.binding_location);
+			if let Some(block_bindings) = cmd.block_bindings_mut() {
+				for (binding, _) in block_bindings {
+					if let BlockBinding::Named(name) = binding {
+						let block = pipeline.block_by_name(*name).unwrap();
+						*binding = BlockBinding::Explicit(block.binding_location);
+					}
+				}
+			};
+
+			if let Some(image_bindings) = cmd.image_bindings_mut() {
+				for binding in image_bindings.iter_mut() {
+					let ImageBindingLocation::Named(name) = binding.location() else { continue };
+					let unit = pipeline.image_binding_by_name(name).unwrap();
+
+					binding.set_location(ImageBindingLocation::Explicit(unit));
 				}
 			}
 		}
 
 		// Determine required alignment for bound buffer
 		for cmd in commands.iter() {
-			let block_bindings = match cmd {
-				Command::Draw(cmd) => &cmd.block_bindings,
-				Command::Dispatch(cmd) => &cmd.block_bindings,
-			};
+			if let Some(block_bindings) = cmd.block_bindings() {
+				for (binding, buffer) in block_bindings {
+					let BlockBinding::Explicit(location) = binding else { continue };
 
-			for (binding, buffer) in block_bindings.iter() {
-				let BlockBinding::Explicit(location) = binding else { continue };
+					let requested_alignment = match location {
+						BindingLocation::Ubo(_) => self.uniform_buffer_offset_alignment,
+						BindingLocation::Ssbo(_) => SSBO_ALIGNMENT,
+					};
 
-				let requested_alignment = match location {
-					BindingLocation::Ubo(_) => self.uniform_buffer_offset_alignment,
-					BindingLocation::Ssbo(_) => SSBO_ALIGNMENT,
-				};
-
-				frame_state.imbue_buffer_alignment(*buffer, requested_alignment);
+					frame_state.imbue_buffer_alignment(*buffer, requested_alignment);
+				}
 			}
 
 			match cmd {
@@ -134,58 +122,94 @@ impl Context {
 			use crate::upload_heap::BufferAllocation;
 
 			// Lookup and bind pipeline
-			let pipeline_def = match &cmd {
-				Command::Draw(cmd) => PipelineDef {
-					vertex: Some(cmd.vertex_shader),
-					fragment: cmd.fragment_shader,
-					.. PipelineDef::default()
-				},
+			let pipeline = cmd.pipeline_def()
+				.map(|def| self.resource_manager.get_pipeline(&def).unwrap());
 
-				Command::Dispatch(cmd) => PipelineDef {
-					compute: Some(cmd.compute_shader),
-					.. PipelineDef::default()
-				},
-			};
-
-			let pipeline = self.resource_manager.get_pipeline(&pipeline_def).unwrap();
-
-			unsafe {
-				gl::BindProgramPipeline(pipeline.name);
-			}
-
-
-			// Bind buffers
-			let block_bindings = match &cmd {
-				Command::Draw(cmd) => &cmd.block_bindings,
-				Command::Dispatch(cmd) => &cmd.block_bindings,
-			};
-
-			for &(block_binding, buffer) in block_bindings {
-				let binding_location = match block_binding {
-					BlockBinding::Explicit(location) => location,
-					BlockBinding::Named(name) => {
-						panic!("Unresolved named binding '{name}'");
-					}
-				};
-
-				let (index, ty, barrier_bit) = match binding_location {
-					BindingLocation::Ubo(index) => (index, gl::UNIFORM_BUFFER, gl::UNIFORM_BARRIER_BIT),
-					BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER, gl::SHADER_STORAGE_BARRIER_BIT),
-				};
-
-				barrier_tracker.insert_barrier(buffer, barrier_bit);
-
-				let block = pipeline.block_by_binding_location(binding_location).unwrap();
-				if block.is_read_write {
-					barrier_tracker.mark_buffer(buffer);
-				}
-
-				let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
-
+			if let Some(pipeline) = pipeline {
 				unsafe {
-					gl::BindBufferRange(ty, index, upload_buffer_name, offset as isize, size as isize);
+					gl::BindProgramPipeline(pipeline.name);
+				}
+
+				// Bind buffers
+				if let Some(bindings) = cmd.block_bindings() {
+					for &(block_binding, buffer) in bindings {
+						let binding_location = match block_binding {
+							BlockBinding::Explicit(location) => location,
+							BlockBinding::Named(name) => {
+								panic!("Unresolved named binding '{name}'");
+							}
+						};
+
+						let (index, ty, barrier_bit) = match binding_location {
+							BindingLocation::Ubo(index) => (index, gl::UNIFORM_BUFFER, gl::UNIFORM_BARRIER_BIT),
+							BindingLocation::Ssbo(index) => (index, gl::SHADER_STORAGE_BUFFER, gl::SHADER_STORAGE_BARRIER_BIT),
+						};
+
+						barrier_tracker.insert_barrier(buffer, barrier_bit);
+
+						let block = pipeline.block_by_binding_location(binding_location).unwrap();
+						if block.is_read_write {
+							barrier_tracker.mark_resource(buffer);
+						}
+
+						let BufferAllocation{offset, size} = frame_state.resolve_buffer_allocation(buffer);
+
+						unsafe {
+							gl::BindBufferRange(ty, index, upload_buffer_name, offset as isize, size as isize);
+						}
+					}
+				}
+
+				// Bind textures and images
+				if let Some(bindings) = cmd.image_bindings() {
+					use crate::commands::ImageBinding;
+
+					for binding in bindings {
+						let image_handle = binding.image_handle();
+						let image_name = self.resource_manager.resolve_image(image_handle)
+							.expect("Failed to resolve image handle - probably use after delete")
+							.name;
+
+						match binding {
+							ImageBinding::Texture{sampler, location: ImageBindingLocation::Explicit(unit), ..} => {
+								let sampler_name = self.resource_manager.get_sampler(sampler).name;
+
+								barrier_tracker.insert_barrier(image_handle, gl::TEXTURE_FETCH_BARRIER_BIT);
+
+								unsafe {
+									gl::BindTextureUnit(*unit, image_name);
+									gl::BindSampler(*unit, sampler_name);
+								}
+							}
+
+							ImageBinding::Image{read_write, location: ImageBindingLocation::Explicit(unit), ..} => {
+								barrier_tracker.insert_barrier(image_handle, gl::SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+								if *read_write {
+									barrier_tracker.mark_resource(image_handle);
+								}
+
+								let (level, layered, layer) = (0, 0, 0);
+								let access_flags = match read_write {
+									true => gl::READ_WRITE,
+									false => gl::READ_ONLY,
+								};
+
+								// TODO(pat.m): how do I determine an appropriate value for this?
+								// Divine it from the shader?
+								let bind_format = gl::RGBA8;
+
+								unsafe {
+									gl::BindImageTexture(*unit, image_name, level, layered, layer, access_flags, bind_format);
+								}
+							}
+
+							_ => unimplemented!(),
+						}
+					}
 				}
 			}
+
 
 
 			// Bind command specific state and execute
@@ -243,9 +267,28 @@ impl Context {
 
 use std::collections::HashMap;
 
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+enum TrackerHandle {
+	Buffer(BufferHandle),
+	Image(ImageHandle),
+}
+
+impl From<BufferHandle> for TrackerHandle {
+	fn from(o: BufferHandle) -> Self {
+		TrackerHandle::Buffer(o)
+	}
+}
+
+impl From<ImageHandle> for TrackerHandle {
+	fn from(o: ImageHandle) -> Self {
+		TrackerHandle::Image(o)
+	}
+}
+
+
 #[derive(Debug, Default)]
 struct ResourceBarrierTracker {
-	buffers: HashMap<BufferHandle, bool>,
+	buffers: HashMap<TrackerHandle, bool>,
 }
 
 impl ResourceBarrierTracker {
@@ -253,12 +296,12 @@ impl ResourceBarrierTracker {
 		Self::default()
 	}
 
-	fn mark_buffer(&mut self, handle: BufferHandle) {
-		self.buffers.insert(handle, true);
+	fn mark_resource(&mut self, handle: impl Into<TrackerHandle>) {
+		self.buffers.insert(handle.into(), true);
 	}
 
-	fn insert_barrier(&mut self, handle: BufferHandle, barrier_bits: u32) {
-		let should_insert = self.buffers.insert(handle, false)
+	fn insert_barrier(&mut self, handle: impl Into<TrackerHandle>, barrier_bits: u32) {
+		let should_insert = self.buffers.insert(handle.into(), false)
 			.unwrap_or(false);
 
 		if !should_insert {

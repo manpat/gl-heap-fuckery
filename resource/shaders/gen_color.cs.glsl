@@ -6,9 +6,9 @@ layout(std430, binding=0) buffer ColorBuffer {
 
 
 void main() {
-	vec4 color = vec4(1.0, 0.0, 1.0, 1.0);
+	vec4 color = s_color;
 
-	for (int i = 0; i < 100; i++) {
+	for (int i = 0; i < 2; i++) {
 		color = mix(color, vec4(0.2, 0.5, 1.0, 1.0), 0.01);
 	}
 
