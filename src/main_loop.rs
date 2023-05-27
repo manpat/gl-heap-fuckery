@@ -83,6 +83,12 @@ pub fn run<F, M>(start_main_loop: F) -> anyhow::Result<()>
 	});
 
 
+	// Set up srgb backbuffer
+	unsafe {
+		gl::Enable(gl::FRAMEBUFFER_SRGB);
+	}
+
+
 	// Set up debug callbacks
 	unsafe {
 		gl::DebugMessageCallback(Some(gl_message_callback), std::ptr::null());

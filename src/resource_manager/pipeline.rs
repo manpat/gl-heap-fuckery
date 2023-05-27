@@ -21,7 +21,7 @@ impl PipelineObject {
 		self.composite_blocks.get(name)
 	}
 
-	pub fn block_by_binding_location(&self, loc: super::shader::BindingLocation) -> Option<&BlockDescription> {
+	pub fn block_by_binding_location(&self, loc: super::shader::BlockBindingLocation) -> Option<&BlockDescription> {
 		self.composite_blocks.values().find(move |desc| desc.binding_location == loc)
 	}
 

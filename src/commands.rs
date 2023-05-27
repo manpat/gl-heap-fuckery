@@ -1,9 +1,11 @@
+mod pass;
 mod draw_cmd;
 mod dispatch_cmd;
 
-use crate::resource_manager::{ShaderHandle, BindingLocation, ImageHandle, SamplerDef, PipelineDef};
+use crate::resource_manager::{ShaderHandle, BlockBindingLocation, ImageHandle, SamplerDef, PipelineDef};
 use crate::upload_heap::{UploadHeap, BufferAllocation, UPLOAD_BUFFER_SIZE};
 
+pub use pass::*;
 pub use draw_cmd::*;
 pub use dispatch_cmd::*;
 
@@ -67,46 +69,53 @@ impl Command {
 }
 
 
+#[derive(Debug)]
+pub struct TransientAllocator {
+	transient_data: bumpalo::Bump,
+	reserved_buffers: Vec<ReservedBuffer>,
+	streamed_buffers: Vec<StreamedBuffer>,
+}
 
 #[derive(Debug)]
 pub struct FrameState {
-	transient_data: bumpalo::Bump,
-	pub commands: Vec<Command>,
+	pub passes: Vec<Pass>,
+	pub allocator: TransientAllocator,
 
-	reserved_buffers: Vec<ReservedBuffer>,
-	streamed_buffers: Vec<StreamedBuffer>,
 }
 
 impl FrameState {
 	pub fn new() -> Self {
 		FrameState {
-			transient_data: bumpalo::Bump::with_capacity(UPLOAD_BUFFER_SIZE),
-			commands: Vec::new(),
+			passes: Vec::new(),
 
-			reserved_buffers: Vec::new(),
-			streamed_buffers: Vec::new(),
+			allocator: TransientAllocator {
+				transient_data: bumpalo::Bump::with_capacity(UPLOAD_BUFFER_SIZE),
+				reserved_buffers: Vec::new(),
+				streamed_buffers: Vec::new(),
+			}
 		}
 	}
 
 	pub fn reset(&mut self) {
-		self.commands.clear();
-		self.reserved_buffers.clear();
-		self.streamed_buffers.clear();
-		self.transient_data.reset();
+		// self.commands.clear();
+		self.passes.clear();
+		self.allocator.reserved_buffers.clear();
+		self.allocator.streamed_buffers.clear();
+		self.allocator.transient_data.reset();
 	}
 
-	pub fn push_cmd(&mut self, cmd: impl Into<Command>) {
-		self.commands.push(cmd.into());
+	pub fn push_cmd(&mut self, pass: PassHandle, cmd: impl Into<Command>) {
+		self.passes[pass.0].commands.push(cmd.into());
 	}
 
 
 	pub fn stream_buffer<T>(&mut self, data: &[T]) -> BufferHandle
 		where T: Copy
 	{
-		let data_copy = self.transient_data.alloc_slice_copy(data);
+		let data_copy = self.allocator.transient_data.alloc_slice_copy(data);
 
-		let index = self.streamed_buffers.len();
-		self.streamed_buffers.push(StreamedBuffer::Pending {
+		let index = self.allocator.streamed_buffers.len();
+		self.allocator.streamed_buffers.push(StreamedBuffer::Pending {
 			data: data_copy.as_ptr().cast(),
 			size: data_copy.len() * std::mem::size_of::<T>(),
 			alignment: DEFAULT_BUFFER_ALIGNMENT,
@@ -117,25 +126,32 @@ impl FrameState {
 
 	// TODO(pat.m): maybe reserved buffers shouldn't use the upload heap?
 	// upload heap is mapped, host visible, and that might not be ideal for GPU-only visible stuff
-	pub fn reserve_buffer(&mut self, size: usize) -> BufferHandle
-	{
-		let index = self.reserved_buffers.len();
-		self.reserved_buffers.push(ReservedBuffer::Pending{size, alignment: DEFAULT_BUFFER_ALIGNMENT});
+	pub fn reserve_buffer(&mut self, size: usize) -> BufferHandle {
+		let index = self.allocator.reserved_buffers.len();
+		self.allocator.reserved_buffers.push(ReservedBuffer::Pending{size, alignment: DEFAULT_BUFFER_ALIGNMENT});
 		BufferHandle::Reserved(index)
 	}
 
-	pub fn draw(&mut self, vertex_shader: ShaderHandle, fragment_shader: ShaderHandle) -> DrawCmdBuilder<'_> {
-		DrawCmdBuilder::new(self, vertex_shader, fragment_shader)
+	pub fn pass_builder(&mut self, name: impl Into<String>) -> PassBuilder<'_> {
+		PassBuilder::new(self, name.into())
 	}
 
-	pub fn dispatch(&mut self, compute_shader: ShaderHandle) -> DispatchCmdBuilder<'_> {
-		DispatchCmdBuilder::new(self, compute_shader)
+	pub fn pass(&mut self, name: impl Into<String>) -> PassHandle {
+		self.pass_builder(name).handle()
+	}
+
+	pub fn draw(&mut self, pass: PassHandle, vertex_shader: ShaderHandle, fragment_shader: ShaderHandle) -> DrawCmdBuilder<'_> {
+		DrawCmdBuilder::new(self, pass, vertex_shader, fragment_shader)
+	}
+
+	pub fn dispatch(&mut self, pass: PassHandle, compute_shader: ShaderHandle) -> DispatchCmdBuilder<'_> {
+		DispatchCmdBuilder::new(self, pass, compute_shader)
 	}
 }
 
 
 /////////////////// internal
-impl FrameState {
+impl TransientAllocator {
 	pub fn imbue_buffer_alignment(&mut self, buffer_handle: BufferHandle, requested_alignment: usize) {
 		match buffer_handle {
 			BufferHandle::Streamed(index) => {
@@ -267,12 +283,12 @@ enum ReservedBuffer {
 
 #[derive(Debug, Copy, Clone)]
 pub enum BlockBinding {
-	Explicit(BindingLocation),
+	Explicit(BlockBindingLocation),
 	Named(&'static str),
 }
 
-impl From<BindingLocation> for BlockBinding {
-	fn from(o: BindingLocation) -> BlockBinding {
+impl From<BlockBindingLocation> for BlockBinding {
+	fn from(o: BlockBindingLocation) -> BlockBinding {
 		BlockBinding::Explicit(o)
 	}
 }

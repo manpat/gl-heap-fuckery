@@ -8,7 +8,7 @@ use std::collections::HashMap;
 pub type ResourcePath = std::path::PathBuf;
 pub type ResourcePathRef = std::path::Path;
 
-pub use self::shader::{ShaderType, ShaderDef, ShaderObject, BindingLocation};
+pub use self::shader::{ShaderType, ShaderDef, ShaderObject, BlockBindingLocation};
 pub use self::pipeline::{PipelineDef, PipelineObject};
 pub use self::sampler::{SamplerDef, AddressingMode, FilterMode, SamplerObject};
 pub use self::image::{ImageDef, ImageObject};

@@ -40,7 +40,7 @@ impl ShaderDef {
 
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum BindingLocation {
+pub enum BlockBindingLocation {
 	Ubo(u32),
 	Ssbo(u32),
 }
@@ -48,7 +48,7 @@ pub enum BindingLocation {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct BlockDescription {
-	pub binding_location: BindingLocation,
+	pub binding_location: BlockBindingLocation,
 	pub total_size: u32,
 	pub is_read_write: bool,
 }
@@ -155,7 +155,7 @@ fn reflect_blocks(program_name: u32, content: &str) -> anyhow::Result<HashMap<St
 		let name = String::from_utf8(str_buf)?;
 
 		blocks.insert(name, BlockDescription {
-			binding_location: BindingLocation::Ubo(buffer_binding as u32),
+			binding_location: BlockBindingLocation::Ubo(buffer_binding as u32),
 			total_size: buffer_data_size as u32,
 			is_read_write: false,
 		});
@@ -189,7 +189,7 @@ fn reflect_blocks(program_name: u32, content: &str) -> anyhow::Result<HashMap<St
 		let is_readonly = buffer_block_has_readonly_keyword(&name, content);
 
 		blocks.insert(name, BlockDescription {
-			binding_location: BindingLocation::Ssbo(buffer_binding as u32),
+			binding_location: BlockBindingLocation::Ssbo(buffer_binding as u32),
 			total_size: buffer_data_size as u32,
 			is_read_write: !is_readonly,
 		});

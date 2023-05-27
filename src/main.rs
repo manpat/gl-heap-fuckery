@@ -107,13 +107,12 @@ impl main_loop::MainLoop for Game {
 		let args_buffer = self.frame_state.reserve_buffer(std::mem::size_of::<[u32; 3]>());
 		let colour_buffer = self.frame_state.reserve_buffer(std::mem::size_of::<[f32; 4]>());
 
-		self.frame_state.dispatch(self.gen_args_compute_shader)
+		let compute_pass = self.frame_state.pass("compute");
+		let draw_pass = self.frame_state.pass("draw");
+
+		self.frame_state.dispatch(compute_pass, self.gen_args_compute_shader)
 			.groups(1, 1, 1)
 			.buffer("ArgsBuffer", args_buffer)
-			.buffer("ColorBuffer", colour_buffer);
-
-		self.frame_state.dispatch(self.gen_color_compute_shader)
-			.indirect(args_buffer)
 			.buffer("ColorBuffer", colour_buffer);
 
 		{
@@ -125,12 +124,12 @@ impl main_loop::MainLoop for Game {
 			];
 
 
-			self.frame_state.draw(self.vert_shader, self.frag_shader)
+			self.frame_state.draw(draw_pass, self.vert_shader, self.frag_shader)
 				.elements(6)
 				.ubo(0, proj_view_buffer)
 				.buffer("PerDrawUniforms", colour_buffer)
 				.buffer("Positions", &vertex_buffer)
-				.buffer(BindingLocation::Ssbo(1), quad_index_buffer);
+				.buffer(BlockBindingLocation::Ssbo(1), quad_index_buffer);
 		}
 
 		{
@@ -148,7 +147,7 @@ impl main_loop::MainLoop for Game {
 				[0.7, 1.0, 1.0, 1.0f32],
 			];
 
-			self.frame_state.draw(self.vert_indexed_shader, self.frag_shader)
+			self.frame_state.draw(draw_pass, self.vert_indexed_shader, self.frag_shader)
 				.indexed(quad_index_buffer)
 				.elements(6)
 				.instances(4)
@@ -168,12 +167,16 @@ impl main_loop::MainLoop for Game {
 				color: [1.0, 1.0, 1.0, 1.0],
 			};
 
-			self.frame_state.draw(self.vert_sprite_shader, self.frag_textured_shader)
+			self.frame_state.draw(draw_pass, self.vert_sprite_shader, self.frag_textured_shader)
 				.elements(6)
 				.ubo(0, proj_view_buffer)
 				.buffer("SpriteData", &sprite_data)
 				.texture("u_texture", self.coolcat_image, SamplerDef::nearest_clamped());
 		}
+
+		self.frame_state.dispatch(compute_pass, self.gen_color_compute_shader)
+			.indirect(args_buffer)
+			.buffer("ColorBuffer", colour_buffer);
 
 		self.context.end_frame(&mut self.frame_state);
 	}

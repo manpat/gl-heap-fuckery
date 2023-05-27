@@ -12,14 +12,6 @@ pub struct ImageObject {
 	pub size: Vec2i,
 }
 
-impl ImageObject {
-	// pub fn bindless_handle_with_sampler(&self, sampler_name: u32) -> u64 {
-	// 	unsafe {
-	// 		gl::GetTextureSamplerHandleARB(self.name, sampler_name)
-	// 	}
-	// }
-}
-
 impl ImageDef {
 	pub fn new(path: impl Into<ResourcePath>) -> ImageDef {
 		ImageDef {

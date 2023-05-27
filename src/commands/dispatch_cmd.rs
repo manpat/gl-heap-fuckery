@@ -1,5 +1,5 @@
-use super::{BufferHandle, IntoBufferHandle, BlockBinding, Command, FrameState, ImageBinding, ImageBindingLocation};
-use crate::resource_manager::{ShaderHandle, BindingLocation, ImageHandle, SamplerDef};
+use super::{BufferHandle, IntoBufferHandle, BlockBinding, Command, FrameState, ImageBinding, ImageBindingLocation, PassHandle};
+use crate::resource_manager::{ShaderHandle, BlockBindingLocation, ImageHandle, SamplerDef};
 
 use std::mem::ManuallyDrop;
 
@@ -32,6 +32,7 @@ impl From<DispatchCmd> for Command {
 pub struct DispatchCmdBuilder<'fs> {
 	frame_state: &'fs mut FrameState,
 	cmd: ManuallyDrop<DispatchCmd>,
+	pass: PassHandle,
 }
 
 impl<'fs> DispatchCmdBuilder<'fs> {
@@ -54,11 +55,11 @@ impl<'fs> DispatchCmdBuilder<'fs> {
 	}
 
 	pub fn ubo(&mut self, index: u32, buffer: impl IntoBufferHandle) -> &mut Self {
-		self.buffer(BindingLocation::Ubo(index), buffer)
+		self.buffer(BlockBindingLocation::Ubo(index), buffer)
 	}
 
 	pub fn ssbo(&mut self, index: u32, buffer: impl IntoBufferHandle) -> &mut Self {
-		self.buffer(BindingLocation::Ssbo(index), buffer)
+		self.buffer(BlockBindingLocation::Ssbo(index), buffer)
 	}
 
 	pub fn texture(&mut self, location: impl Into<ImageBindingLocation>, image: ImageHandle, sampler: SamplerDef) -> &mut Self {
@@ -79,7 +80,7 @@ impl<'fs> DispatchCmdBuilder<'fs> {
 
 
 impl<'fs> DispatchCmdBuilder<'fs> {
-	pub(super) fn new(frame_state: &'fs mut FrameState, compute_shader: ShaderHandle) -> Self {
+	pub(super) fn new(frame_state: &'fs mut FrameState, pass: PassHandle, compute_shader: ShaderHandle) -> Self {
 		DispatchCmdBuilder {
 			frame_state,
 			cmd: ManuallyDrop::new(DispatchCmd {
@@ -87,7 +88,8 @@ impl<'fs> DispatchCmdBuilder<'fs> {
 				num_groups: DispatchSizeSource::Explicit([1; 3]),
 				block_bindings: Vec::new(),
 				image_bindings: Vec::new(),
-			})
+			}),
+			pass,
 		}
 	}
 }
@@ -95,6 +97,6 @@ impl<'fs> DispatchCmdBuilder<'fs> {
 impl<'fs> Drop for DispatchCmdBuilder<'fs> {
 	fn drop(&mut self) {
 		let cmd = unsafe { ManuallyDrop::take(&mut self.cmd) };
-		self.frame_state.push_cmd(cmd);
+		self.frame_state.push_cmd(self.pass, cmd);
 	}
 }
