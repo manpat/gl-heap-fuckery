@@ -28,8 +28,8 @@ pub(super) fn load(resource_manager: &ResourceManager, def: &ImageDef)
 		ImageDef::Path(path) => load_from_path(resource_manager, path),
 
 		// TODO(pat.m): don't use fixed sizes! 
-		ImageDef::RenderTarget => create_rendertarget(gl::SRGB8_ALPHA8, Vec2i::new(512, 512)),
-		ImageDef::DepthStencil => create_rendertarget(gl::DEPTH24_STENCIL8, Vec2i::new(512, 512)),
+		ImageDef::RenderTarget => create_rendertarget(gl::SRGB8_ALPHA8, Vec2i::new(32, 32)),
+		ImageDef::DepthStencil => create_rendertarget(gl::DEPTH24_STENCIL8, Vec2i::new(32, 32)),
 	}
 }
 

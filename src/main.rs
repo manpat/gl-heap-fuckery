@@ -115,7 +115,7 @@ impl main_loop::MainLoop for Game {
 
 		let projection_view = Mat4::perspective(PI/3.0, aspect, 0.01, 100.0)
 			* Mat4::translate(Vec3::from_z(-2.0))
-			* Mat4::rotate_y(self.time);
+			* Mat4::rotate_y((self.time * 0.5).sin() * PI / 3.0);
 
 		let proj_view_buffer = self.frame_state.stream_buffer(&[projection_view]);
 		let fake_proj_view_buffer = self.frame_state.stream_buffer(&[fake_projection_view]);
@@ -130,7 +130,7 @@ impl main_loop::MainLoop for Game {
 			.depth_stencil_attachment(self.depth_stencil_image)
 			.handle();
 
-		let final_draw_pass = self.frame_state.pass("draw");
+		let final_draw_pass = self.frame_state.pass("final draw");
 
 		self.frame_state.dispatch(compute_pass, self.gen_args_compute_shader)
 			.groups(1, 1, 1)
@@ -191,7 +191,7 @@ impl main_loop::MainLoop for Game {
 
 			self.frame_state.draw(draw_pass, self.vert_sprite_shader, self.frag_textured_shader)
 				.elements(6)
-				.ubo(0, proj_view_buffer)
+				.ubo(0, fake_proj_view_buffer)
 				.buffer("SpriteData", &sprite_data)
 				.texture("u_texture", self.coolcat_image, SamplerDef::nearest_clamped());
 
