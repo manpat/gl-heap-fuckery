@@ -36,6 +36,8 @@ struct Game {
 	gen_color_compute_shader: ShaderHandle,
 
 	coolcat_image: ImageHandle,
+	render_target: ImageHandle,
+	depth_stencil_image: ImageHandle,
 
 	time: f32,
 }
@@ -57,6 +59,9 @@ impl Game {
 
 		let coolcat_image = context.resource_manager.load_image(&ImageDef::new("images/coolcat.png"))?;
 
+		let render_target = context.resource_manager.load_image(&ImageDef::RenderTarget)?;
+		let depth_stencil_image = context.resource_manager.load_image(&ImageDef::DepthStencil)?;
+
 		unsafe {
 			gl::Enable(gl::DEPTH_TEST);
 		}
@@ -77,6 +82,8 @@ impl Game {
 			gen_color_compute_shader,
 
 			coolcat_image,
+			render_target,
+			depth_stencil_image,
 
 			time: 0.0
 		})
@@ -90,25 +97,40 @@ impl main_loop::MainLoop for Game {
 		self.context.start_frame();
 
 		unsafe {
+			gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
 			gl::Viewport(0, 0, self.backbuffer_size.x, self.backbuffer_size.y);
+
+			// TODO(pat.m): these should probably be commands, or options on passes
 			gl::ClearColor(1.0, 0.5, 1.0, 1.0);
 			gl::Clear(gl::COLOR_BUFFER_BIT|gl::DEPTH_BUFFER_BIT);
+
+			gl::ClearColor(0.5, 1.0, 1.0, 1.0);
 		}
 
 		let aspect = self.backbuffer_size.x as f32 / self.backbuffer_size.y as f32;
+
+		let fake_projection_view = Mat4::perspective(PI/3.0, 1.0, 0.01, 100.0)
+			* Mat4::translate(Vec3::from_z(-2.0))
+			* Mat4::rotate_y(self.time);
 
 		let projection_view = Mat4::perspective(PI/3.0, aspect, 0.01, 100.0)
 			* Mat4::translate(Vec3::from_z(-2.0))
 			* Mat4::rotate_y(self.time);
 
 		let proj_view_buffer = self.frame_state.stream_buffer(&[projection_view]);
+		let fake_proj_view_buffer = self.frame_state.stream_buffer(&[fake_projection_view]);
 		let quad_index_buffer = self.frame_state.stream_buffer(&[0u32, 1, 2, 0, 2, 3]);
 
 		let args_buffer = self.frame_state.reserve_buffer(std::mem::size_of::<[u32; 3]>());
 		let colour_buffer = self.frame_state.reserve_buffer(std::mem::size_of::<[f32; 4]>());
 
 		let compute_pass = self.frame_state.pass("compute");
-		let draw_pass = self.frame_state.pass("draw");
+		let draw_pass = self.frame_state.pass_builder("draw")
+			.color_attachment(0, self.render_target)
+			.depth_stencil_attachment(self.depth_stencil_image)
+			.handle();
+
+		let final_draw_pass = self.frame_state.pass("draw");
 
 		self.frame_state.dispatch(compute_pass, self.gen_args_compute_shader)
 			.groups(1, 1, 1)
@@ -126,7 +148,7 @@ impl main_loop::MainLoop for Game {
 
 			self.frame_state.draw(draw_pass, self.vert_shader, self.frag_shader)
 				.elements(6)
-				.ubo(0, proj_view_buffer)
+				.ubo(0, fake_proj_view_buffer)
 				.buffer("PerDrawUniforms", colour_buffer)
 				.buffer("Positions", &vertex_buffer)
 				.buffer(BlockBindingLocation::Ssbo(1), quad_index_buffer);
@@ -151,7 +173,7 @@ impl main_loop::MainLoop for Game {
 				.indexed(quad_index_buffer)
 				.elements(6)
 				.instances(4)
-				.ubo(0, proj_view_buffer)
+				.ubo(0, fake_proj_view_buffer)
 				.ssbo(0, &vertex_buffer)
 				.ssbo(1, &colour_data);
 		}
@@ -172,6 +194,12 @@ impl main_loop::MainLoop for Game {
 				.ubo(0, proj_view_buffer)
 				.buffer("SpriteData", &sprite_data)
 				.texture("u_texture", self.coolcat_image, SamplerDef::nearest_clamped());
+
+			self.frame_state.draw(final_draw_pass, self.vert_sprite_shader, self.frag_textured_shader)
+				.elements(6)
+				.ubo(0, proj_view_buffer)
+				.buffer("SpriteData", &sprite_data)
+				.texture("u_texture", self.render_target, SamplerDef::nearest_clamped());
 		}
 
 		self.frame_state.dispatch(compute_pass, self.gen_color_compute_shader)
@@ -183,6 +211,7 @@ impl main_loop::MainLoop for Game {
 
 	fn resize(&mut self, size: Vec2i) {
 		self.backbuffer_size = size;
+		self.context.resource_manager.notify_size_changed(size);
 	}
 }
 

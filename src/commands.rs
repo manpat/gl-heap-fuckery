@@ -109,6 +109,7 @@ impl FrameState {
 	}
 
 
+	// TODO(pat.m): data should take either slice or Copy object
 	pub fn stream_buffer<T>(&mut self, data: &[T]) -> BufferHandle
 		where T: Copy
 	{

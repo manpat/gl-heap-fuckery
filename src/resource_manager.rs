@@ -2,6 +2,7 @@ pub mod shader;
 pub mod pipeline;
 pub mod sampler;
 pub mod image;
+pub mod fbo;
 
 use std::collections::HashMap;
 
@@ -12,6 +13,10 @@ pub use self::shader::{ShaderType, ShaderDef, ShaderObject, BlockBindingLocation
 pub use self::pipeline::{PipelineDef, PipelineObject};
 pub use self::sampler::{SamplerDef, AddressingMode, FilterMode, SamplerObject};
 pub use self::image::{ImageDef, ImageObject};
+pub use self::fbo::{FboDef, FboObject};
+
+use common::math::Vec2i;
+
 
 
 
@@ -32,8 +37,10 @@ pub struct ResourceManager {
 	shader_counter: u32,
 
 	pipeline_objects: HashMap<PipelineDef, PipelineObject>,
-
 	sampler_objects: HashMap<SamplerDef, SamplerObject>,
+	fbo_objects: HashMap<FboDef, FboObject>,
+
+	default_fbo: FboObject,
 
 	image_defs: HashMap<ImageDef, ImageHandle>,
 	image_objects: HashMap<ImageHandle, ImageObject>,
@@ -55,6 +62,13 @@ impl ResourceManager {
 
 			pipeline_objects: HashMap::default(),
 			sampler_objects: HashMap::default(),
+			fbo_objects: HashMap::default(),
+
+			default_fbo: FboObject {
+				name: 0,
+				viewport_size: Vec2i::zero(),
+			},
+
 
 			image_defs: HashMap::default(),
 			image_objects: HashMap::default(),
@@ -64,6 +78,10 @@ impl ResourceManager {
 
 	pub fn resolve_path(&self, path: &ResourcePathRef) -> ResourcePath {
 		self.resource_root_path.join(path)
+	}
+
+	pub fn notify_size_changed(&mut self, new_size: Vec2i) {
+		self.default_fbo.viewport_size = new_size;
 	}
 
 	pub fn load_text(&mut self, def: &ResourcePathRef) -> anyhow::Result<String> {
@@ -92,7 +110,7 @@ impl ResourceManager {
 			return Ok(*handle);
 		}
 
-		let object = self::image::load_raw(self, def)?;
+		let object = self::image::load(self, def)?;
 
 		let handle = ImageHandle(self.image_counter);
 		self.image_counter += 1;
@@ -119,6 +137,23 @@ impl ResourceManager {
 		self.sampler_objects.entry(def.clone())
 			.or_insert_with(|| self::sampler::create_sampler(def))
 	}
+
+	pub fn get_fbo<'s>(&'s mut self, def: &'_ FboDef) -> anyhow::Result<&'s FboObject> {
+		if def == &FboDef::default() {
+			return Ok(&self.default_fbo);
+		}
+
+		// HACK: I can't figure out the lifetimes for this - something goes weird if I try to use if let = get here
+		// see: https://users.rust-lang.org/t/lifetime-is-not-dropped-after-if-let-x-return-x/42892
+		if self.fbo_objects.contains_key(def) {
+			return Ok(self.fbo_objects.get(def).unwrap())
+		}
+
+		let object = self::fbo::create(self, def)?;
+		let object = self.fbo_objects.entry(def.clone()).or_insert(object);
+		Ok(object)
+	}
+
 
 	pub fn resolve_shader(&self, handle: ShaderHandle) -> Option<&ShaderObject> {
 		self.shader_objects.get(&handle)

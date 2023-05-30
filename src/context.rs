@@ -1,6 +1,8 @@
 use crate::resource_manager::*;
 use crate::commands::{self, Command, FrameState, BufferHandle};
 use crate::upload_heap::UploadHeap;
+use common::math::Vec2i;
+
 
 
 pub const SSBO_ALIGNMENT: usize = 32;
@@ -110,10 +112,6 @@ impl Context {
 		}
 
 
-		// unsafe {
-		// 	let msg = "Frame Evaluate";
-		// 	gl::PushDebugGroup(gl::DEBUG_SOURCE_APPLICATION, 0, msg.len() as i32, msg.as_ptr() as *const _);
-		// }
 
 		allocator.upload_buffers(&mut self.upload_heap);
 
@@ -125,6 +123,21 @@ impl Context {
 			unsafe {
 				let msg = format!("pass: {}", pass.name);
 				gl::PushDebugGroup(gl::DEBUG_SOURCE_APPLICATION, 0, msg.len() as i32, msg.as_ptr() as *const _);
+			}
+
+			let fbo = self.resource_manager.get_fbo(&pass.fbo_def).unwrap();
+
+			// TODO(pat.m): insert barriers for any dirty images used as fbo attachments
+			unsafe {
+				gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, fbo.name);
+
+				let Vec2i{x, y} = fbo.viewport_size;
+				gl::Viewport(0, 0, x, y);
+
+				// TODO(pat.m): should be option! some passes may want to preserve contents!
+				if fbo.name != 0 {					
+					gl::Clear(gl::COLOR_BUFFER_BIT|gl::DEPTH_BUFFER_BIT|gl::STENCIL_BUFFER_BIT);
+				}
 			}
 
 			for cmd in pass.commands.iter() {
@@ -270,10 +283,6 @@ impl Context {
 
 		self.upload_heap.notify_finished();
 		frame_state.reset();
-
-		// unsafe {
-		// 	gl::PopDebugGroup();
-		// }
 	}
 }
 
