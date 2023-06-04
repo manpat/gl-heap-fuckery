@@ -52,18 +52,29 @@ void main() {
 	barrier();
 	groupMemoryBarrier();
 
-	for (int pass = 0; pass < 32; pass++) {
+	for (int pass = 0; pass < 8; pass++) {
 		vec3 sum = vec3(0.0);
 
-		for (int j = -1; j <= 1; j++) {
-			for (int i = -1; i <= 1; i++) {
-				sum += read_sample(current_buffer, local_id + ivec2(i, j));
-			}
+		for (int i = -3; i <= 3; i++) {
+			sum += read_sample(current_buffer, local_id + ivec2(i, 0));
 		}
 
 		current_buffer = 1-current_buffer;
 
-		write_sample(current_buffer, local_id, sum / 9.0);
+		write_sample(current_buffer, local_id, sum / 7.0);
+
+		barrier();
+		groupMemoryBarrier();
+
+		sum = vec3(0.0);
+
+		for (int i = -3; i <= 3; i++) {
+			sum += read_sample(current_buffer, local_id + ivec2(0, i));
+		}
+
+		current_buffer = 1-current_buffer;
+
+		write_sample(current_buffer, local_id, sum / 7.0);
 
 		barrier();
 		groupMemoryBarrier();
