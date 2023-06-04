@@ -4,14 +4,46 @@ use common::math::Vec2i;
 #[derive(Hash, Clone, Debug, Eq, PartialEq)]
 pub enum ImageDef {
 	Path(ResourcePath),
-	RenderTarget,
-	DepthStencil,
+	Runtime {
+		format: u32,
+		size: ImageSize,
+	}
+}
+
+impl ImageDef {
+	pub fn render_target(format: u32) -> ImageDef {
+		ImageDef::Runtime {
+			format,
+			size: ImageSize::Backbuffer,
+		}
+	}
+
+	pub fn depth_stencil() -> ImageDef {
+		ImageDef::render_target(gl::DEPTH24_STENCIL8)
+	}
+}
+
+
+#[derive(Hash, Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ImageSize {
+	Fixed(Vec2i),
+	Backbuffer,
+}
+
+impl ImageSize {
+	pub fn resolve(self, backbuffer_size: Vec2i) -> Vec2i {
+		match self {
+			ImageSize::Fixed(size) => size,
+			ImageSize::Backbuffer => backbuffer_size,
+		}
+	}
 }
 
 #[derive(Debug)]
 pub struct ImageObject {
 	pub name: u32,
-	pub size: Vec2i,
+	pub size: ImageSize,
+	pub format: u32,
 }
 
 impl ImageDef {
@@ -24,12 +56,11 @@ impl ImageDef {
 pub(super) fn load(resource_manager: &ResourceManager, def: &ImageDef)
 	-> anyhow::Result<ImageObject>
 {
+	let backbuffer_size = resource_manager.backbuffer_size;
+
 	match def {
 		ImageDef::Path(path) => load_from_path(resource_manager, path),
-
-		// TODO(pat.m): don't use fixed sizes! 
-		ImageDef::RenderTarget => create_rendertarget(gl::SRGB8_ALPHA8, Vec2i::new(32, 32)),
-		ImageDef::DepthStencil => create_rendertarget(gl::DEPTH24_STENCIL8, Vec2i::new(32, 32)),
+		ImageDef::Runtime{ format, size } => create_rendertarget(*format, size.resolve(backbuffer_size)),
 	}
 }
 
@@ -63,7 +94,8 @@ fn load_from_path(resource_manager: &ResourceManager, path: &ResourcePathRef)
 
 	Ok(ImageObject {
 		name,
-		size,
+		size: ImageSize::Fixed(size),
+		format: gl::SRGB8_ALPHA8,
 	})
 }
 
@@ -84,6 +116,7 @@ fn create_rendertarget(format: u32, size: Vec2i)
 
 	Ok(ImageObject {
 		name,
-		size,
+		size: ImageSize::Backbuffer,
+		format,
 	})
 }

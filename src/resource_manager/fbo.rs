@@ -38,12 +38,12 @@ pub(super) fn create(resource_manager: &ResourceManager, def: &FboDef)
 pub(super) fn resolve_and_bind(resource_manager: &ResourceManager, def: &FboDef,
 	fbo: &mut FboObject)
 {
-	fbo.viewport_size = Vec2i::zero();
+	let mut common_size = None;
 
 	if let Some(handle) = def.color_attachment_0 {
 		let image = resource_manager.resolve_image(handle).unwrap();
 
-		fbo.viewport_size = image.size;
+		common_size = Some(image.size);
 
 		unsafe {
 			gl::NamedFramebufferTexture(fbo.name, gl::COLOR_ATTACHMENT0, image.name, 0);
@@ -53,8 +53,8 @@ pub(super) fn resolve_and_bind(resource_manager: &ResourceManager, def: &FboDef,
 	if let Some(handle) = def.color_attachment_1 {
 		let image = resource_manager.resolve_image(handle).unwrap();
 
-		assert!(fbo.viewport_size == Vec2i::zero() || fbo.viewport_size == image.size);
-		fbo.viewport_size = image.size;
+		assert!(common_size == None || common_size == Some(image.size));
+		common_size = Some(image.size);
 
 		unsafe {
 			gl::NamedFramebufferTexture(fbo.name, gl::COLOR_ATTACHMENT1, image.name, 0);
@@ -64,8 +64,8 @@ pub(super) fn resolve_and_bind(resource_manager: &ResourceManager, def: &FboDef,
 	if let Some(handle) = def.color_attachment_2 {
 		let image = resource_manager.resolve_image(handle).unwrap();
 
-		assert!(fbo.viewport_size == Vec2i::zero() || fbo.viewport_size == image.size);
-		fbo.viewport_size = image.size;
+		assert!(common_size == None || common_size == Some(image.size));
+		common_size = Some(image.size);
 
 		unsafe {
 			gl::NamedFramebufferTexture(fbo.name, gl::COLOR_ATTACHMENT2, image.name, 0);
@@ -75,8 +75,8 @@ pub(super) fn resolve_and_bind(resource_manager: &ResourceManager, def: &FboDef,
 	if let Some(handle) = def.color_attachment_3 {
 		let image = resource_manager.resolve_image(handle).unwrap();
 
-		assert!(fbo.viewport_size == Vec2i::zero() || fbo.viewport_size == image.size);
-		fbo.viewport_size = image.size;
+		assert!(common_size == None || common_size == Some(image.size));
+		common_size = Some(image.size);
 
 		unsafe {
 			gl::NamedFramebufferTexture(fbo.name, gl::COLOR_ATTACHMENT3, image.name, 0);
@@ -86,8 +86,8 @@ pub(super) fn resolve_and_bind(resource_manager: &ResourceManager, def: &FboDef,
 	if let Some(handle) = def.depth_stencil_attachment {
 		let image = resource_manager.resolve_image(handle).unwrap();
 
-		assert!(fbo.viewport_size == Vec2i::zero() || fbo.viewport_size == image.size);
-		fbo.viewport_size = image.size;
+		assert!(common_size == None || common_size == Some(image.size));
+		common_size = Some(image.size);
 
 		unsafe {
 			gl::NamedFramebufferTexture(fbo.name, gl::DEPTH_STENCIL_ATTACHMENT, image.name, 0);
@@ -96,4 +96,8 @@ pub(super) fn resolve_and_bind(resource_manager: &ResourceManager, def: &FboDef,
 
 	let status = unsafe { gl::CheckNamedFramebufferStatus(fbo.name, gl::DRAW_FRAMEBUFFER) };
 	assert!(status == gl::FRAMEBUFFER_COMPLETE);
+
+	fbo.viewport_size = common_size
+		.map(|s| s.resolve(resource_manager.backbuffer_size))
+		.unwrap_or(Vec2i::zero());
 }

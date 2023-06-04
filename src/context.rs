@@ -69,7 +69,8 @@ impl Context {
 			if let Some(block_bindings) = cmd.block_bindings_mut() {
 				for (binding, _) in block_bindings {
 					if let BlockBinding::Named(name) = binding {
-						let block = pipeline.block_by_name(*name).unwrap();
+						let block = pipeline.block_by_name(*name)
+							.expect(&format!("Couldn't find block binding with name '{name}'"));
 						*binding = BlockBinding::Explicit(block.binding_location);
 					}
 				}
@@ -78,7 +79,8 @@ impl Context {
 			if let Some(image_bindings) = cmd.image_bindings_mut() {
 				for binding in image_bindings.iter_mut() {
 					let ImageBindingLocation::Named(name) = binding.location() else { continue };
-					let unit = pipeline.image_binding_by_name(name).unwrap();
+					let unit = pipeline.image_binding_by_name(name)
+						.expect(&format!("Couldn't find image binding with name '{name}'"));
 
 					binding.set_location(ImageBindingLocation::Explicit(unit));
 				}
@@ -135,7 +137,7 @@ impl Context {
 				gl::Viewport(0, 0, x, y);
 
 				// TODO(pat.m): should be option! some passes may want to preserve contents!
-				if fbo.name != 0 {					
+				if fbo.name != 0 {
 					gl::Clear(gl::COLOR_BUFFER_BIT|gl::DEPTH_BUFFER_BIT|gl::STENCIL_BUFFER_BIT);
 				}
 			}
@@ -188,9 +190,11 @@ impl Context {
 
 						for binding in bindings {
 							let image_handle = binding.image_handle();
-							let image_name = self.resource_manager.resolve_image(image_handle)
-								.expect("Failed to resolve image handle - probably use after delete")
-								.name;
+							let image = self.resource_manager.resolve_image(image_handle)
+								.expect("Failed to resolve image handle - probably use after delete");
+
+							let image_name = image.name;
+							let image_format = image.format;
 
 							match binding {
 								ImageBinding::Texture{sampler, location: ImageBindingLocation::Explicit(unit), ..} => {
@@ -217,12 +221,8 @@ impl Context {
 										false => gl::READ_ONLY,
 									};
 
-									// TODO(pat.m): how do I determine an appropriate value for this?
-									// Divine it from the shader?
-									let bind_format = gl::RGBA8;
-
 									unsafe {
-										gl::BindImageTexture(*unit, image_name, level, layered, layer, access_flags, bind_format);
+										gl::BindImageTexture(*unit, image_name, level, layered, layer, access_flags, image_format);
 									}
 								}
 

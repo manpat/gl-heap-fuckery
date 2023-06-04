@@ -175,8 +175,8 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
 name = "common"
-version = "0.3.0"
-source = "git+https://github.com/manpat/common-rs.git#1fc6d0ae6e4beab698c2d5e2a12648954a18607e"
+version = "0.3.1"
+source = "git+https://github.com/manpat/common-rs.git#0ef993435b97d6db19076a3f7e2be97705b3d3d5"
 dependencies = [
  "rand",
  "rand_derive2",

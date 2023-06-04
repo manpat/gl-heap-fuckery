@@ -12,7 +12,7 @@ pub type ResourcePathRef = std::path::Path;
 pub use self::shader::{ShaderType, ShaderDef, ShaderObject, BlockBindingLocation};
 pub use self::pipeline::{PipelineDef, PipelineObject};
 pub use self::sampler::{SamplerDef, AddressingMode, FilterMode, SamplerObject};
-pub use self::image::{ImageDef, ImageObject};
+pub use self::image::{ImageDef, ImageObject, ImageSize};
 pub use self::fbo::{FboDef, FboObject};
 
 use common::math::Vec2i;
@@ -40,6 +40,7 @@ pub struct ResourceManager {
 	sampler_objects: HashMap<SamplerDef, SamplerObject>,
 	fbo_objects: HashMap<FboDef, FboObject>,
 
+	backbuffer_size: Vec2i,
 	default_fbo: FboObject,
 
 	image_defs: HashMap<ImageDef, ImageHandle>,
@@ -53,6 +54,14 @@ impl ResourceManager {
 
 		anyhow::ensure!(resource_root_path.exists(), "Couldn't find resource path");
 
+		let viewport_size = unsafe {
+			let mut viewport = [0; 4];
+			gl::GetIntegerv(gl::VIEWPORT, viewport.as_mut_ptr());
+			let [_, _, x, y] = viewport;
+			Vec2i::new(x, y)
+		};
+
+
 		Ok(Self{
 			resource_root_path,
 
@@ -64,9 +73,10 @@ impl ResourceManager {
 			sampler_objects: HashMap::default(),
 			fbo_objects: HashMap::default(),
 
+			backbuffer_size: viewport_size,
 			default_fbo: FboObject {
 				name: 0,
-				viewport_size: Vec2i::zero(),
+				viewport_size,
 			},
 
 
@@ -80,8 +90,43 @@ impl ResourceManager {
 		self.resource_root_path.join(path)
 	}
 
+	pub fn backbuffer_size(&self) -> Vec2i {
+		self.backbuffer_size
+	}
+
 	pub fn notify_size_changed(&mut self, new_size: Vec2i) {
+		self.backbuffer_size = new_size;
 		self.default_fbo.viewport_size = new_size;
+
+
+		for image in self.image_objects.values_mut() {
+			if image.size != ImageSize::Backbuffer {
+				continue
+			}
+
+			let mut object_label = [0i8; 256];
+			let mut label_length = 0;
+
+			unsafe {
+				gl::GetObjectLabel(gl::TEXTURE, image.name, object_label.len() as i32,
+					&mut label_length, object_label.as_mut_ptr());
+
+				gl::DeleteTextures(1, &image.name);
+				gl::CreateTextures(gl::TEXTURE_2D, 1, &mut image.name);
+				gl::TextureStorage2D(image.name, 1, image.format, new_size.x, new_size.y);
+
+				gl::ObjectLabel(gl::TEXTURE, image.name, label_length, object_label.as_ptr());
+			}
+		}
+
+
+		let mut fbo_objects = std::mem::replace(&mut self.fbo_objects, HashMap::default());
+
+		for (def, fbo) in fbo_objects.iter_mut() {
+			fbo::resolve_and_bind(self, def, fbo);
+		}
+
+		self.fbo_objects = fbo_objects;
 	}
 
 	pub fn load_text(&mut self, def: &ResourcePathRef) -> anyhow::Result<String> {

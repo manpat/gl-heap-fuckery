@@ -12,7 +12,7 @@ glutin = "0.30"
 glutin-winit = "0.2"
 raw-window-handle = "0.5.0"
 anyhow = "1.0.71"
-common = { git = "https://github.com/manpat/common-rs.git", version = "0.3" }
+common = { git = "https://github.com/manpat/common-rs.git", version = "0.3.1" }
 bumpalo = "3.12.1"
 
 [dependencies.image]
