@@ -21,6 +21,10 @@ impl ImageDef {
 	pub fn depth_stencil() -> ImageDef {
 		ImageDef::render_target(gl::DEPTH24_STENCIL8)
 	}
+
+	pub fn is_shared(&self) -> bool {
+		matches!(self, ImageDef::Path(_))
+	}
 }
 
 
@@ -110,7 +114,7 @@ fn create_rendertarget(format: u32, size: Vec2i)
 		gl::CreateTextures(gl::TEXTURE_2D, 1, &mut name);
 		gl::TextureStorage2D(name, 1, format, size.x, size.y);
 
-		let label = "rendertarget";
+		let label = format!("rendertarget {name}");
 		gl::ObjectLabel(gl::TEXTURE, name, label.len() as i32, label.as_ptr() as *const _);
 	}
 

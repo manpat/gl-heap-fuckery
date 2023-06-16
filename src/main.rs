@@ -36,8 +36,14 @@ struct Game {
 	gen_color_compute_shader: ShaderHandle,
 	post_process_compute_shader: ShaderHandle,
 
+	rgb_to_yuv_cs: ShaderHandle,
+	yuv_to_rgb_cs: ShaderHandle,
+	blur_uv_cs: ShaderHandle,
+
 	coolcat_image: ImageHandle,
 	render_target: ImageHandle,
+	yuv_target: ImageHandle,
+	yuv2_target: ImageHandle,
 	depth_stencil_image: ImageHandle,
 
 	time: f32,
@@ -59,9 +65,15 @@ impl Game {
 		let gen_color_compute_shader = context.resource_manager.load_shader(&ShaderDef::compute("shaders/gen_color.cs.glsl"))?;
 		let post_process_compute_shader = context.resource_manager.load_shader(&ShaderDef::compute("shaders/post_process.cs.glsl"))?;
 
+		let rgb_to_yuv_cs = context.resource_manager.load_shader(&ShaderDef::compute("shaders/rgb_to_yuv.cs.glsl"))?;
+		let yuv_to_rgb_cs = context.resource_manager.load_shader(&ShaderDef::compute("shaders/yuv_to_rgb.cs.glsl"))?;
+		let blur_uv_cs = context.resource_manager.load_shader(&ShaderDef::compute("shaders/blur_uv.cs.glsl"))?;
+
 		let coolcat_image = context.resource_manager.load_image(&ImageDef::new("images/coolcat.png"))?;
 
 		let render_target = context.resource_manager.load_image(&ImageDef::render_target(gl::R11F_G11F_B10F))?;
+		let yuv_target = context.resource_manager.load_image(&ImageDef::render_target(gl::RGBA16F))?;
+		let yuv2_target = context.resource_manager.load_image(&ImageDef::render_target(gl::RGBA16F))?;
 		let depth_stencil_image = context.resource_manager.load_image(&ImageDef::depth_stencil())?;
 
 		unsafe {
@@ -84,8 +96,14 @@ impl Game {
 			gen_color_compute_shader,
 			post_process_compute_shader,
 
+			rgb_to_yuv_cs,
+			yuv_to_rgb_cs,
+			blur_uv_cs,
+
 			coolcat_image,
 			render_target,
+			yuv_target,
+			yuv2_target,
 			depth_stencil_image,
 
 			time: 0.0
@@ -202,7 +220,7 @@ impl main_loop::MainLoop for Game {
 
 		// Post processing
 		{
-			let workgroup_size = self.context.resource_manager.resolve_shader(self.post_process_compute_shader)
+			let workgroup_size = self.context.resource_manager.resolve_shader(self.blur_uv_cs)
 				.unwrap()
 				.workgroup_size
 				.unwrap();
@@ -211,9 +229,29 @@ impl main_loop::MainLoop for Game {
 
 			let Vec2i{x, y} = (self.backbuffer_size + workgroup_size - Vec2i::splat(1)) / workgroup_size;
 
-			self.frame_state.dispatch(post_process_pass, self.post_process_compute_shader)
+			self.frame_state.dispatch(post_process_pass, self.rgb_to_yuv_cs)
 				.groups(x as u32, y as u32, 1)
-				.image_rw("u_image", self.render_target);
+				.image("u_rgb_image", self.render_target)
+				.image_rw("u_yuv_image", self.yuv_target);
+
+			for _ in 0..2 {
+				self.frame_state.dispatch(post_process_pass, self.blur_uv_cs)
+					.groups(x as u32, y as u32, 1)
+					.image("u_yuv_src", self.yuv_target)
+					.image_rw("u_yuv_dest", self.yuv2_target)
+					.ubo(0, &1u32);
+
+				self.frame_state.dispatch(post_process_pass, self.blur_uv_cs)
+					.groups(x as u32, y as u32, 1)
+					.image("u_yuv_src", self.yuv2_target)
+					.image_rw("u_yuv_dest", self.yuv_target)
+					.ubo(0, &0u32);
+			}
+
+			self.frame_state.dispatch(post_process_pass, self.yuv_to_rgb_cs)
+				.groups(x as u32, y as u32, 1)
+				.image("u_yuv_image", self.yuv_target)
+				.image_rw("u_rgb_image", self.render_target);
 		}
 
 

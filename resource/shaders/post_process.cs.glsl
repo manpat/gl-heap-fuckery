@@ -1,24 +1,24 @@
-layout(local_size_x=32, local_size_y=32, local_size_z=1) in;
+layout(local_size_x=16, local_size_y=16, local_size_z=1) in;
 
 layout(binding = 0, r11f_g11f_b10f) uniform image2D u_image;
 
 
 
 vec3 rgb_to_yuv(in vec3 rgb){
-    float y = 0.299*rgb.r + 0.587*rgb.g + 0.114*rgb.b;
-    return vec3(y, 0.493*(rgb.b-y), 0.877*(rgb.r-y));
+	float y = 0.299*rgb.r + 0.587*rgb.g + 0.114*rgb.b;
+	return vec3(y, 0.493*(rgb.b-y), 0.877*(rgb.r-y));
 }
 
 vec3 yuv_to_rgb(in vec3 yuv){
-    float y = yuv.x;
-    float u = yuv.y;
-    float v = yuv.z;
-    
-    return vec3(
-        y + 1.0/0.877*v,
-        y - 0.39393*u - 0.58081*v,
-        y + 1.0/0.493*u
-    );
+	float y = yuv.x;
+	float u = yuv.y;
+	float v = yuv.z;
+	
+	return vec3(
+		y + 1.0/0.877*v,
+		y - 0.39393*u - 0.58081*v,
+		y + 1.0/0.493*u
+	);
 }
 
 
@@ -89,9 +89,9 @@ void main() {
 	local_yuv.bg = sum.bg;
 	// local_yuv.r = sum.r;
 
-	// yuv.r = 0.5;
-	// yuv.g = 1.0;
-	// yuv.b = -0.1;
+	// local_yuv.r = 0.5;
+	// local_yuv.g = 1.0;
+	// local_yuv.b = -0.1;
 
 	vec4 final = vec4(1.0);
 

@@ -151,8 +151,12 @@ impl ResourceManager {
 	}
 
 	pub fn load_image(&mut self, def: &ImageDef) -> anyhow::Result<ImageHandle> {
-		if let Some(handle) = self.image_defs.get(def) {
-			return Ok(*handle);
+		let is_shared = def.is_shared();
+
+		if is_shared {
+			if let Some(handle) = self.image_defs.get(def) {
+				return Ok(*handle);
+			}
 		}
 
 		let object = self::image::load(self, def)?;
@@ -160,7 +164,10 @@ impl ResourceManager {
 		let handle = ImageHandle(self.image_counter);
 		self.image_counter += 1;
 
-		self.image_defs.insert(def.clone(), handle);
+		if is_shared {
+			self.image_defs.insert(def.clone(), handle);
+		}
+		
 		self.image_objects.insert(handle, object);
 
 		Ok(handle)
