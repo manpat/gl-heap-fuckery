@@ -1,11 +1,11 @@
 layout(local_size_x=8, local_size_y=8) in;
 
-layout(binding = 0, rgba32f) uniform readonly image2D u_yuv_src;
-layout(binding = 1, rgba32f) uniform writeonly image2D u_yuv_dest;
+layout(binding = 0, rgba16f) uniform readonly image2D u_yuv_src;
+layout(binding = 1, rgba16f) uniform writeonly image2D u_yuv_dest;
 
 
 layout(std140, binding=0) uniform BlurUniforms {
-    int u_horizontal;
+    ivec2 u_direction;
 };
 
 // TODO(pat.m): cache texture reads
@@ -33,19 +33,17 @@ void main() {
 
 	vec4 texel = imageLoad(u_yuv_src, global_id);
 
-	int distance = 10;
-	ivec2 direction = u_horizontal>0 ? ivec2(distance, 0) : ivec2(0, distance);
-
 	texel.gb *= weight[0];
 
 	for (int i = 1; i < 5; i++) {
-		ivec2 sample_1 = global_id + direction * i;
-		ivec2 sample_2 = global_id - direction * i;
+		ivec2 sample_1 = global_id + u_direction * i;
+		ivec2 sample_2 = global_id - u_direction * i;
 		texel.gb += imageLoad(u_yuv_src, sample_1).gb * weight[i];
 		texel.gb += imageLoad(u_yuv_src, sample_2).gb * weight[i];
 	}
 
 	// texel.gb /= 2.0;
+	// texel.gb *= 2.0;
 	// texel.gb = floor(texel.gb * 4.0) / 4.0;
 
 	imageStore(u_yuv_dest, global_id, texel);

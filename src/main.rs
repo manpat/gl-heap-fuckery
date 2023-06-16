@@ -234,18 +234,18 @@ impl main_loop::MainLoop for Game {
 				.image("u_rgb_image", self.render_target)
 				.image_rw("u_yuv_image", self.yuv_target);
 
-			for _ in 0..2 {
+			for i in 0..4 {
 				self.frame_state.dispatch(post_process_pass, self.blur_uv_cs)
 					.groups(x as u32, y as u32, 1)
 					.image("u_yuv_src", self.yuv_target)
 					.image_rw("u_yuv_dest", self.yuv2_target)
-					.ubo(0, &1u32);
+					.ubo(0, &Vec2i::new(6>>i, 0));
 
 				self.frame_state.dispatch(post_process_pass, self.blur_uv_cs)
 					.groups(x as u32, y as u32, 1)
 					.image("u_yuv_src", self.yuv2_target)
 					.image_rw("u_yuv_dest", self.yuv_target)
-					.ubo(0, &0u32);
+					.ubo(0, &Vec2i::new(0, 6>>i));
 			}
 
 			self.frame_state.dispatch(post_process_pass, self.yuv_to_rgb_cs)
