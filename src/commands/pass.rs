@@ -11,6 +11,7 @@ pub struct Pass {
 	pub name: String,
 	pub commands: Vec<Command>,
 	pub fbo_def: FboDef,
+	pub wants_timer_query: bool,
 }
 
 #[must_use]
@@ -27,6 +28,7 @@ impl<'fs> PassBuilder<'fs> {
 			name,
 			commands: Vec::new(),
 			fbo_def: FboDef::default(),
+			wants_timer_query: false,
 		});
 
 		PassBuilder {
@@ -53,6 +55,11 @@ impl<'fs> PassBuilder<'fs> {
 
 	pub fn depth_stencil_attachment(&mut self, image: ImageHandle) -> &mut Self {
 		self.pass.fbo_def.depth_stencil_attachment = Some(image);
+		self
+	}
+
+	pub fn time(&mut self) -> &mut Self {
+		self.pass.wants_timer_query = true;
 		self
 	}
 

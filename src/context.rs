@@ -1,7 +1,7 @@
 use crate::resource_manager::*;
 use crate::commands::{self, Command, FrameState, BufferHandle};
 use crate::upload_heap::UploadHeap;
-use common::math::Vec2i;
+use common::math::{Vec2i, Vec3i};
 
 
 
@@ -16,6 +16,9 @@ pub struct Context {
 	vao_name: u32,
 
 	uniform_buffer_offset_alignment: usize,
+
+	in_flight_queries: Vec<InFlightQuery>,
+	query_pool: Vec<u32>,
 }
 
 impl Context {
@@ -44,6 +47,9 @@ impl Context {
 			vao_name,
 
 			uniform_buffer_offset_alignment: uniform_buffer_offset_alignment as usize,
+
+			in_flight_queries: Vec::new(),
+			query_pool: Vec::new(),
 		})
 	}
 
@@ -140,6 +146,29 @@ impl Context {
 				if fbo.name != 0 {
 					gl::Clear(gl::COLOR_BUFFER_BIT|gl::DEPTH_BUFFER_BIT|gl::STENCIL_BUFFER_BIT);
 				}
+			}
+
+			let mut timer_query = None;
+
+			if pass.wants_timer_query {
+				let mut gl_name = 0;
+
+				if let Some(pooled_name) = self.query_pool.pop() {
+					gl_name = pooled_name;
+				} else {
+					unsafe {
+						gl::GenQueries(1, &mut gl_name);
+					}
+				}
+
+				unsafe {
+					gl::BeginQuery(gl::TIME_ELAPSED, gl_name);
+				}
+
+				timer_query = Some(InFlightQuery {
+					gl_name,
+					pass_name: pass.name.clone(),
+				});
 			}
 
 			for cmd in pass.commands.iter() {
@@ -268,12 +297,20 @@ impl Context {
 								}
 							}
 
-							DispatchSizeSource::Explicit([x, y, z]) => unsafe {
-								gl::DispatchCompute(x, y, z);
+							DispatchSizeSource::Explicit(Vec3i{x, y, z}) => unsafe {
+								gl::DispatchCompute(x as u32, y as u32, z as u32);
 							}
 						}
 					}
 				}
+			}
+
+			if let Some(query) = timer_query {
+				unsafe {
+					gl::EndQuery(gl::TIME_ELAPSED);
+				}
+
+				self.in_flight_queries.push(query);
 			}
 
 			unsafe {
@@ -283,6 +320,33 @@ impl Context {
 
 		self.upload_heap.notify_finished();
 		frame_state.reset();
+
+		self.process_queries();
+	}
+
+
+	fn process_queries(&mut self) {
+		for query in &mut self.in_flight_queries {
+			let mut ready = 0;
+			let mut nanos = 0;
+			unsafe {
+				gl::GetQueryObjectiv(query.gl_name, gl::QUERY_RESULT_AVAILABLE, &mut ready);
+
+				if ready != 0 {
+					gl::GetQueryObjectui64v(query.gl_name, gl::QUERY_RESULT, &mut nanos);
+
+					self.query_pool.push(query.gl_name);
+					query.gl_name = 0;
+				}
+			}
+
+			if ready != 0 {
+				let micros = std::time::Duration::from_nanos(nanos).as_micros();
+				println!("pass '{}' took {:4.0}us", query.pass_name, micros);
+			}
+		}
+
+		self.in_flight_queries.retain(|query| query.gl_name != 0);
 	}
 }
 
@@ -345,4 +409,12 @@ impl ResourceBarrierTracker {
 			}
 		}
 	}
+}
+
+
+
+#[derive(Debug)]
+struct InFlightQuery {
+	pass_name: String,
+	gl_name: u32,
 }

@@ -2,12 +2,12 @@ use super::{BufferHandle, IntoBufferHandle, BlockBinding, Command, FrameState, I
 use crate::resource_manager::{ShaderHandle, BlockBindingLocation, ImageHandle, SamplerDef};
 
 use std::mem::ManuallyDrop;
-
+use common::Vec3i;
 
 
 #[derive(Debug)]
 pub enum DispatchSizeSource {
-	Explicit([u32; 3]),
+	Explicit(Vec3i),
 	Indirect(BufferHandle),
 }
 
@@ -42,8 +42,8 @@ impl<'fs> DispatchCmdBuilder<'fs> {
 		self
 	}
 
-	pub fn groups(&mut self, x: u32, y: u32, z: u32) -> &mut Self {
-		self.cmd.num_groups = DispatchSizeSource::Explicit([x, y, z]);
+	pub fn groups(&mut self, num_groups: impl Into<Vec3i>) -> &mut Self {
+		self.cmd.num_groups = DispatchSizeSource::Explicit(num_groups.into());
 		self
 	}
 
@@ -85,7 +85,7 @@ impl<'fs> DispatchCmdBuilder<'fs> {
 			frame_state,
 			cmd: ManuallyDrop::new(DispatchCmd {
 				compute_shader,
-				num_groups: DispatchSizeSource::Explicit([1; 3]),
+				num_groups: DispatchSizeSource::Explicit(Vec3i::splat(1)),
 				block_bindings: Vec::new(),
 				image_bindings: Vec::new(),
 			}),

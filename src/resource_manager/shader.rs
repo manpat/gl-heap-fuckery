@@ -1,4 +1,5 @@
 use super::{ResourceManager, ResourcePath};
+use common::Vec3i;
 use std::collections::HashMap;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -59,7 +60,7 @@ pub struct ShaderObject {
 	pub name: u32,
 	pub blocks: HashMap<String, BlockDescription>,
 	pub image_bindings: HashMap<String, u32>, // HACK: don't really care about whether they're texture or image units for now
-	pub workgroup_size: Option<[u32; 3]>,
+	pub workgroup_size: Option<Vec3i>,
 }
 
 
@@ -352,12 +353,12 @@ fn reflect_image_bindings(program_name: u32, _content: &str) -> anyhow::Result<H
 	Ok(image_bindings)
 }
 
-fn reflect_workgroup_size(program_name: u32) -> [u32; 3] {
-	let mut workgroup_size = [0u32; 3];
+fn reflect_workgroup_size(program_name: u32) -> Vec3i {
+	let mut workgroup_size = [0i32; 3];
 
 	unsafe {
 		gl::GetProgramiv(program_name, gl::COMPUTE_WORK_GROUP_SIZE, workgroup_size.as_mut_ptr() as *mut i32);
 	}
 
-	workgroup_size
+	Vec3i::from(workgroup_size)
 }

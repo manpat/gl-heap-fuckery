@@ -146,12 +146,13 @@ impl main_loop::MainLoop for Game {
 			.depth_stencil_attachment(self.depth_stencil_image)
 			.handle();
 
-		let post_process_pass = self.frame_state.pass("post-process");
+		let post_process_pass = self.frame_state.pass_builder("post-process")
+			// .time()
+			.handle();
 
 		let final_draw_pass = self.frame_state.pass("final draw");
 
 		self.frame_state.dispatch(initial_compute_pass, self.gen_args_compute_shader)
-			.groups(1, 1, 1)
 			.buffer("ArgsBuffer", args_buffer)
 			.buffer("ColorBuffer", colour_buffer);
 
@@ -220,36 +221,38 @@ impl main_loop::MainLoop for Game {
 
 		// Post processing
 		{
-			let workgroup_size = self.context.resource_manager.resolve_shader(self.blur_uv_cs)
-				.unwrap()
-				.workgroup_size
-				.unwrap();
+			let conversion_workgroup_size = self.context.resource_manager.resolve_shader(self.rgb_to_yuv_cs).unwrap()
+				.workgroup_size.unwrap();
 
-			let workgroup_size = Vec2i::new(workgroup_size[0] as i32, workgroup_size[1] as i32);
+			let blur_workgroup_size = self.context.resource_manager.resolve_shader(self.blur_uv_cs).unwrap()
+				.workgroup_size.unwrap();
 
-			let Vec2i{x, y} = (self.backbuffer_size + workgroup_size - Vec2i::splat(1)) / workgroup_size;
+			let num_conversion_groups = self.backbuffer_size.extend(1).div_ceil(conversion_workgroup_size);
+			let num_blur_groups = self.backbuffer_size.extend(1).div_ceil(blur_workgroup_size);
 
 			self.frame_state.dispatch(post_process_pass, self.rgb_to_yuv_cs)
-				.groups(x as u32, y as u32, 1)
+				.groups(num_conversion_groups)
 				.image("u_rgb_image", self.render_target)
 				.image_rw("u_yuv_image", self.yuv_target);
 
-			for i in 0..4 {
-				self.frame_state.dispatch(post_process_pass, self.blur_uv_cs)
-					.groups(x as u32, y as u32, 1)
-					.image("u_yuv_src", self.yuv_target)
-					.image_rw("u_yuv_dest", self.yuv2_target)
-					.ubo(0, &Vec2i::new(6>>i, 0));
+			for i in (0..3).rev() {
+				let distance = 2<<i;
 
 				self.frame_state.dispatch(post_process_pass, self.blur_uv_cs)
-					.groups(x as u32, y as u32, 1)
-					.image("u_yuv_src", self.yuv2_target)
+					.groups(num_blur_groups)
+					.texture("u_yuv_src", self.yuv_target, SamplerDef::linear_clamped())
+					.image_rw("u_yuv_dest", self.yuv2_target)
+					.ubo(0, &Vec2i::new(distance, 0));
+
+				self.frame_state.dispatch(post_process_pass, self.blur_uv_cs)
+					.groups(num_blur_groups)
+					.texture("u_yuv_src", self.yuv2_target, SamplerDef::linear_clamped())
 					.image_rw("u_yuv_dest", self.yuv_target)
-					.ubo(0, &Vec2i::new(0, 6>>i));
+					.ubo(0, &Vec2i::new(0, distance));
 			}
 
 			self.frame_state.dispatch(post_process_pass, self.yuv_to_rgb_cs)
-				.groups(x as u32, y as u32, 1)
+				.groups(num_conversion_groups)
 				.image("u_yuv_image", self.yuv_target)
 				.image_rw("u_rgb_image", self.render_target);
 		}
